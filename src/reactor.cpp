@@ -171,7 +171,7 @@ reactor::~reactor() {
     this->epoll_fd = -1;
 }
 
-void reactor::listen_init() {}
+//void reactor::listen_init() {}
 
 void reactor::listen_init(void (*accept_connection)(event*)) {
     struct sockaddr_in serv_addr = {0};
@@ -220,7 +220,7 @@ void reactor::listen_init(void (*accept_connection)(event*)) {
     throw std::runtime_error("reactor::listen_init: Failed to create listening socket - " + std::string(strerror(errno)));
 }
 
-void reactor::listen_init(std::function<void(event*)>accept_connection) {}
+//void reactor::listen_init(std::function<void(event*)>accept_connection) {}
 
 int reactor::wait() {
 again:

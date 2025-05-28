@@ -123,14 +123,14 @@ again:
     e->add_to_tree();
 }
 
-int read_size_from(event* e, int* size) {
+int read_size_from(event* e, int* datasize) {
     if (!e || !e->p_rea) {
         std::cerr << "Invalid event or reactor pointer" << std::endl;
         return false;
     }
     int n;
 again:
-    n = read(e->fd, size, sizeof(int));
+    n = read(e->fd, datasize, sizeof(int));
     if (n == -1) {
         if (errno == EINTR) {
             goto again;
@@ -152,13 +152,189 @@ again:
         std::cerr << "Read size mismatch: expected " << sizeof(int) << ", got " << n << std::endl;
         return 0;
     }
-    return true;
+    return 1;
 }
 
-int write_size_to(event* e, int* size) {
+int read_size_from(int fd, int* datasize) {
+    if (fd < 0 || !datasize) {
+        std::cerr << "Invalid file descriptor or data size pointer" << std::endl;
+        return false;
+    }
+    int n;
+again:
+    n = read(fd, datasize, sizeof(int));
+    if (n == -1) {
+        if (errno == EINTR) {
+            goto again;
+        }
+        else if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            std::cerr << "No data available to read from fd: " << fd << std::endl;
+            return 0;
+        }
+        else {
+            std::cerr << "Read error: " << strerror(errno) << std::endl;
+            return 0;
+        }
+    }
+    else if (n == 0) {
+        std::cerr << "Connection closed on fd: " << fd << std::endl;
+        return -1;
+    }
+    else if (n != sizeof(int)) {
+        std::cerr << "Read size mismatch: expected " << sizeof(int) << ", got " << n << std::endl;
+        return 0;
+    }
+    return 1;
+}
 
+int write_size_to(event* e, int* datasize) {
+    if (!e || !e->p_rea) {
+        std::cerr << "Invalid event or reactor pointer" << std::endl;
+        return 0;
+    }
+    int n;
+again:
+    n = write(e->fd, datasize, sizeof(int));
+    if (n == -1) {
+        if (errno == EINTR) {
+            goto again;
+        }
+        else {
+            std::cerr << "Write error: " << strerror(errno) << std::endl;
+            return -1;
+        }
+    }
+    else if (n != sizeof(int)) {
+        std::cerr << "Write size mismatch: expected " << sizeof(int) << ", got " << n << std::endl;
+        return -1;
+    }
+    return 1;
+}
+
+int write_size_to(int fd, int* datasize) {
+    int n;
+again:
+    n = write(fd, datasize, sizeof(int));
+    if (n == -1) {
+        if (errno == EINTR) {
+            goto again;
+        }
+        else {
+            std::cerr << "Write error: " << strerror(errno) << std::endl;
+            return -1;
+        }
+    }
+    else if (n != sizeof(int)) {
+        std::cerr << "Write size mismatch: expected " << sizeof(int) << ", got " << n << std::endl;
+        return -1;
+    }
+    return 1;
 }
 
 int read_from(event* e) {
+    if (!e || !e->p_rea) {
+        std::cerr << "Invalid event or reactor pointer" << std::endl;
+        return -1;
+    }
+    int n;
+again:
+    n = read(e->fd, e->buf, e->buffer_size);
+    if (n == -1) {
+        if (errno == EINTR) {
+            goto again;
+        }
+        else if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            std::cerr << "No data available to read from client: " << e->fd << std::endl;
+            return 0;
+        }
+        else {
+            std::cerr << "Read error: " << strerror(errno) << std::endl;
+            return -1;
+        }
+    }
+    else if (n == 0) {
+        std::cerr << "Client closed connection: " << e->fd << std::endl;
+        return -1;
+    }
+    e->buf[n] = '\0';
+    e->buflen = n;
+    return n;
+}
 
+int read_from(int fd, char* buf, int buf_size, int* buflen) {
+    if (fd < 0 || !buf || buf_size <= 0) {
+        std::cerr << "Invalid file descriptor or buffer" << std::endl;
+        return -1;
+    }
+    int n;
+again:
+    n = read(fd, buf, buf_size);
+    if (n == -1) {
+        if (errno == EINTR) {
+            goto again;
+        }
+        else if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            std::cerr << "No data available to read from client: " << fd << std::endl;
+            return 0;
+        }
+        else {
+            std::cerr << "Read error: " << strerror(errno) << std::endl;
+            return -1;
+        }
+    }
+    else if (n == 0) {
+        std::cerr << "Client closed connection: " << fd << std::endl;
+        return -1;
+    }
+    buf[n] = '\0';
+    *buflen = n;
+    return n;
+}
+
+int write_to(event* e) {
+    if (!e || !e->p_rea) {
+        std::cerr << "Invalid event or reactor pointer" << std::endl;
+        return -1;
+    }
+    int n;
+again:
+    n = write(e->fd, e->buf, e->buflen);
+    if (n == -1) {
+        if (errno == EINTR) {
+            goto again;
+        }
+        else {
+            std::cerr << "Write error: " << strerror(errno) << std::endl;
+            return -1;
+        }
+    }
+    else if (n != e->buflen) {
+        std::cerr << "Write size mismatch: expected " << e->buflen << ", got " << n << std::endl;
+        return -1;
+    }
+    return n;
+}
+
+int write_to(int fd, const char* buf, int buf_size, int* buflen) {
+    if (fd < 0 || !buf || buf_size <= 0) {
+        std::cerr << "Invalid file descriptor or buffer" << std::endl;
+        return -1;
+    }
+    int n;
+again:
+    n = write(fd, buf, *buflen);
+    if (n == -1) {
+        if (errno == EINTR) {
+            goto again;
+        }
+        else {
+            std::cerr << "Write error: " << strerror(errno) << std::endl;
+            return -1;
+        }
+    }
+    else if (n != *buflen) {
+        std::cerr << "Write size mismatch: expected " << buflen << ", got " << n << std::endl;
+        return -1;
+    }
+    return n;
 }

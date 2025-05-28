@@ -1,7 +1,80 @@
-#include "../include/ftp.hpp"
-#include "../include/action.hpp"
+#ifndef CLIENT_HPP
+#define CLIENT_HPP
+
+#include <string>
 #include <iostream>
-#include <stdexcept>
+#include "../include/thread_pool.hpp"
+#include "../include/action.hpp"
+
+class Socket;
+class interface;
+class ftp_client;
+class file_manager;
+
+class interface {
+public:
+    ftp_client* p_client;
+    std::string command_num;
+    std::string control_info;
+    std::string data_info;
+    bool running;
+
+    interface(ftp_client* client) : p_client(client), running(false) {}
+    ~interface() = default;
+    void main_loop();
+    void un_menu();
+    void cd_menu();
+
+    void print_connection_info();
+    void change_dir(const std::string& dir_path);
+    void list_files();
+    void create_dir(const std::string& dir_name);
+    void send_request(const std::string& command);
+    void upload_file(const std::string& file_path);
+    void download_file(const std::string& file_path);
+    void delete_file(const std::string& file_path);
+};
+
+class file_manager {};
+
+class Socket {
+public:
+    int fd = -1;
+    std::string ip;
+    short port;
+    sa_family_t family = AF_INET;
+    struct sockaddr_in serv_addr;
+    char *buf = nullptr;
+    int buflen = 0;
+    int buffer_size = BUFSIZ;
+
+    Socket() = delete;
+    Socket(int fd, std::string ip, short port, sa_family_t family);
+    ~Socket();
+
+    bool connect();
+};
+
+class ftp_client {
+private:
+    friend class interface;
+    thread_pool* pool = nullptr;
+    interface ui = interface(this);
+    file_manager* fm = nullptr;
+    Socket* conn_socket = nullptr;
+    Socket* data_socket = nullptr;
+public:
+    bool cntl_connected = false;
+    bool data_connected = false;
+
+    ftp_client();
+    ~ftp_client();
+    void launch();
+    void cntl_connect();
+    void data_connect();
+    void cntl_disconnect();
+    void data_disconnect();
+};
 
 /* ---------- interface ---------- */
 
@@ -28,30 +101,41 @@ void interface::main_loop() {
             std::cout << "Please enter a command: ";
             std::getline(std::cin, command_num);
             if (command_num == "1") {
+                // 切换目录
                 std::cout << "Enter directory path: ";
                 std::string dir_path;
                 std::getline(std::cin, dir_path);
-                // Call change directory function here
-            } else if (command_num == "2") {
-                // Call list files function here
-            } else if (command_num == "3") {
+            }
+            else if (command_num == "2") {
+                // 远程ls命令
+            }
+            else if (command_num == "3") {
+                // 创建目录
                 std::cout << "Enter new directory name: ";
                 std::string dir_name;
                 std::getline(std::cin, dir_name);
-                // Call create directory function here
-            } else if (command_num == "4") {
-                // Call send command function here
-            } else if (command_num == "5") {
+            }
+            else if (command_num == "4") {
+                // 发送文件管理请求
+                p_client->data_connect();
+                system("pause");
+            }
+            else if (command_num == "5") {
                 // Call upload file function here
-            } else if (command_num == "6") {
+            }
+            else if (command_num == "6") {
                 // Call download file function here
-            } else if (command_num == "7") {
+            }
+            else if (command_num == "7") {
                 // Call delete file function here
-            } else if (command_num == "8") {
+            }
+            else if (command_num == "8") {
                 p_client->data_disconnect();
-            } else if (command_num == "9") {
+            }
+            else if (command_num == "9") {
                 p_client->cntl_disconnect();
-            } else {
+            }
+            else {
                 std::cout << "Invalid command. Please try again." << std::endl;
             }
         }
@@ -76,7 +160,7 @@ void interface::cd_menu() {
     std::cout << "             1. Change Directory"              << std::endl;
     std::cout << "             2. List Files"                    << std::endl;
     std::cout << "             3. Create Directory"              << std::endl;
-    std::cout << "             4. Send PASV Request"             << std::endl;
+    std::cout << "             4. Send PASV Command"             << std::endl;
     std::cout << "             5. Upload File"                   << std::endl;
     std::cout << "             6. Download File"                 << std::endl;
     std::cout << "             7. Delete File"                   << std::endl;
@@ -89,7 +173,7 @@ void interface::cd_menu() {
 
 void interface::print_connection_info() {
     if (p_client->cntl_connected) {
-        std::cout << "Control Connection: " << p_client->conn_socket->ip << ":" 
+        std::cout << "Control Connection: " << p_client->conn_socket->ip << ":"
                   << p_client->conn_socket->port << std::endl;
     } else {
         std::cout << "No control connection established." << std::endl;
@@ -136,10 +220,6 @@ void interface::delete_file(const std::string& file_path) {
     // Implement file deletion logic here
 }
 
-/* ---------- files ---------- */
-
-
-
 /* ---------- socket ---------- */
 
 Socket::Socket(int fd, std::string ip, short port, sa_family_t family = AF_INET)
@@ -176,22 +256,22 @@ bool Socket::connect() {
     return true;
 }
 
-/* ---------- server ---------- */
-
-
-
 /* ---------- client ---------- */
 
 ftp_client::ftp_client() {
+    pool = new thread_pool(4, 8);
+    pool->init();
+    fm = new file_manager();
 }
 
 ftp_client::~ftp_client() {
 }
 
 void ftp_client::launch() {
-    pool.init();
-    auto func = std::bind(&interface::main_loop, &ui);
-    pool.submit(std::move(func));
+    pool->init();
+    ui.running = true;
+    ui.main_loop();
+    pool->shutdown();
 }
 
 void ftp_client::cntl_connect() {
@@ -228,6 +308,23 @@ void ftp_client::cntl_disconnect() {
 }
 
 void ftp_client::data_connect() {
+    if (!cntl_connected) {
+        std::cerr << "Control connection not established. Please connect first." << std::endl;
+        return;
+    }
+    if (data_connected) {
+        std::cerr << "Data connection already established." << std::endl;
+        return;
+    }
+    data_socket = new Socket(socket(AF_INET, SOCK_STREAM, 0), conn_socket->ip, 2101);
+    if (!data_socket->connect()) {
+        std::cerr << "Failed to connect to data socket: " << data_socket->ip << ":" << 2101 << std::endl;
+        delete data_socket;
+        data_socket = nullptr;
+        return;
+    }
+    data_connected = true;
+    std::cout << "Data connection established: " << data_socket->ip << ":" << 2101 << std::endl;
 }
 
 void ftp_client::data_disconnect() {
@@ -243,3 +340,5 @@ void ftp_client::data_disconnect() {
         }
     }
 }
+
+#endif

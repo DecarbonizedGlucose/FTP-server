@@ -1,9 +1,10 @@
-#pragma once
+#ifndef ACTION_HPP
+#define ACTION_HPP
+
 #include <string>
 #include <stdexcept>
 #include <iostream>
 #include <functional>
-#include "../include/ftp.hpp"
 #include "../include/reactor.hpp"
 
 /*
@@ -20,10 +21,16 @@ void test_recv_data(event* e);
 
 void test_send_data(event* e);
 
-int read_size_from(event* e, int* size);
+int read_size_from(event* e, int* datasize);
+int read_size_from(int fd, int* datasize);
 
-int write_size_to(event* e, int* size);
+int write_size_to(event* e, int* datasize);
+int write_size_to(int fd, int* datasize);
 
 int read_from(event* e);
+int read_from(int fd, char* buf, int buf_size, int* buflen);
 
 int write_to(event* e);
+int write_to(int fd, const char* buf, int buf_size, int* buflen);
+
+#endif

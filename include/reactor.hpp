@@ -1,4 +1,6 @@
-#pragma once
+#ifndef REACTOR_HPP
+#define REACTOR_HPP
+
 #include <ctime>
 #include <sys/epoll.h>
 #include <netinet/in.h>
@@ -50,9 +52,9 @@ public:
     reactor& operator=(reactor&&) = delete;
     ~reactor();
 
-    void listen_init();
+    //void listen_init();
     void listen_init(void (*accept_connection)(event*));
-    void listen_init(std::function<void(event*)>accept_connection);
+    //void listen_init(std::function<void(event*)>accept_connection);
     int wait();
 };
 
@@ -87,3 +89,5 @@ public:
     bool is_buf_full() const;
     void call_back();
 };
+
+#endif // REACTOR_HPP
