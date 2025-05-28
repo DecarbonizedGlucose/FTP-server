@@ -141,9 +141,9 @@ reactor::reactor() {
 }
 
 reactor::reactor(
-    std::string ip = "", short port = 8080, sa_family_t fam = AF_INET,
-    int buf_size = BUFSIZ, int max_events = 50,
-    int max_clients = 128, int epoll_timeout = 2000
+    std::string ip, short port, sa_family_t fam,
+    int buf_size, int max_events,
+    int max_clients, int epoll_timeout
 )   : ip(std::move(ip)), family(fam), port(port),
     event_buf_size(buf_size), max_events(max_events),
     max_clients(max_clients), epoll_timeout(epoll_timeout) {
