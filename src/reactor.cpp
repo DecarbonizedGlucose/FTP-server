@@ -1,4 +1,4 @@
-#include "reactor.hpp"
+#include "../include/reactor.hpp"
 
 /* ---------- event ---------- */
 
@@ -171,7 +171,9 @@ reactor::~reactor() {
     this->epoll_fd = -1;
 }
 
-void reactor::listen_init() {
+void reactor::listen_init() {}
+
+void reactor::listen_init(void (*accept_connection)(event*)) {
     struct sockaddr_in serv_addr = {0};
     serv_addr.sin_family = this->family;
     serv_addr.sin_port = htons(this->port);
@@ -218,6 +220,8 @@ void reactor::listen_init() {
     throw std::runtime_error("reactor::listen_init: Failed to create listening socket - " + std::string(strerror(errno)));
 }
 
+void reactor::listen_init(std::function<void(event*)>accept_connection) {}
+
 int reactor::wait() {
 again:
     int ret =  epoll_wait(this->epoll_fd, this->epoll_events, this->max_events, this->epoll_timeout);
@@ -230,127 +234,4 @@ again:
     else {
         return ret;
     }
-}
-
-/* ---------- call back funcs ---------- */
-
-void recv_data(event* ev) {}
-
-void send_data(event* ev) {}
-
-void accept_connection(event* ev) {
-    struct sockaddr_in client_addr = {0};
-    int i;
-    socklen_t addr_len = sizeof(client_addr);
-    int cfd = accept(ev->fd, (struct sockaddr*)&client_addr, &addr_len);
-    event* pe;
-    do {
-        if (cfd < 0) {
-            if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                return; // No more connections to accept
-            }
-            std::cerr << "Failed to accept connection: " << strerror(errno) << std::endl;
-            break;
-        }
-        for (i = 0; i < ev->p_rea->max_events; ++i) {
-            if (ev->p_rea->events[i] == nullptr) {
-                break; // Found an empty slot
-            }
-        }
-        if (i == ev->p_rea->max_events) {
-            std::cerr << "Max events reached, cannot accept more connections" << std::endl;
-            break;
-        }
-        int flag = fcntl(cfd, F_SETFL, O_NONBLOCK);
-        if (flag < 0) {
-            std::cerr << "Failed to set non-blocking mode: " << strerror(errno) << std::endl;
-            break;
-        }
-        pe = new event(cfd, EPOLLIN | EPOLLET, ev->p_rea->event_buf_size);
-        if (!pe) {
-            std::cerr << "Failed to create event for new connection" << std::endl;
-            break;
-        }
-        ev->p_rea->events[i] = pe;
-        pe->set(std::bind(test_recv_data, pe));
-        pe->apply_to_reactor(ev->p_rea);
-        // print message
-        std::cout << "Client connected: " << inet_ntoa(client_addr.sin_addr) << ":" << ntohs(client_addr.sin_port) << std::endl;
-        return;
-    } while (0);
-    close(cfd);
-    throw std::runtime_error("Failed to accept connection - " + std::string(strerror(errno)));
-}
-
-void test_recv_data(event* e) {
-    if (!e || !e->p_rea) {
-        std::cerr << "Invalid event or reactor pointer" << std::endl;
-        return;
-    }
-    int n;
-    // Read data from the socket
-    while (true) {
-        n = read(e->fd, e->buf, e->buffer_size);
-        if (n == -1) {
-            if (errno == EINTR) {
-                continue;
-            }
-            else if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                std::cerr << "No data available to read from client: " << e->fd << std::endl;
-                break;
-            }
-            else {
-                throw std::runtime_error("Read error: " + std::string(strerror(errno)));
-            }
-        }
-        else if (n == 0) {
-            std::cerr << "Client closed connection: " << e->fd << std::endl;
-            e->remove_from_tree();
-            for (auto& ev : e->p_rea->events) {
-                if (ev && ev->fd == e->fd) {
-                    ev = nullptr; // Remove from reactor's event list
-                    break;
-                }
-            }
-            close(e->fd);
-            delete e;
-            e = nullptr;
-            return;
-        }
-        e->buf[n] = '\0';
-        e->buflen = n;
-        std::cout << "Received from client " << e->fd << ": " << e->buf << std::endl;
-        // Process data
-        for (int i = 0; i < n; ++i) {
-            e->buf[i] = toupper(e->buf[i]);
-        }
-        std::cout << "Processed data: " << e->buf << std::endl;
-    }
-    auto func = std::bind(test_send_data, e);
-    e->remove_from_tree();
-    e->set(EPOLLOUT | EPOLLET, std::move(func));
-    e->add_to_tree();
-}
-
-void test_send_data(event* e) {
-    if (!e || !e->p_rea) {
-        std::cerr << "Invalid event or reactor pointer" << std::endl;
-        return;
-    }
-    int n;
-again:
-    n = write(e->fd, e->buf, e->buflen);
-    if (n == -1) {
-        if (errno == EINTR) {
-            goto again;
-        }
-        else {
-            throw std::runtime_error("Write error: " + std::string(strerror(errno)));
-        }
-    }
-    std::cout << "Sent: " << e->buf << " to client " << e->fd << std::endl;
-    auto func = std::bind(test_recv_data, e);
-    e->remove_from_tree();
-    e->set(EPOLLIN | EPOLLET, std::move(func));
-    e->add_to_tree();
 }

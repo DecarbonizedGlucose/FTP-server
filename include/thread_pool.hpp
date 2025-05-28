@@ -1,7 +1,3 @@
-/*
-    万用线程池 C++11泛型编程
-*/
-
 #pragma once
 #include <thread>
 #include <mutex>
@@ -10,6 +6,13 @@
 #include <functional>
 #include <future>
 #include <vector>
+
+/*
+ * 一个基于C++11的线程池实现
+ * 该线程池线程安全，支持任务提交和异步执行
+ * 支持任务的返回值，使用std::future获取结果
+ * 支持线程池的初始化、关闭、停止和清理
+*/
 
 template<typename T>
 class safe_queue {

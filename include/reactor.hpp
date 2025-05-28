@@ -51,6 +51,8 @@ public:
     ~reactor();
 
     void listen_init();
+    void listen_init(void (*accept_connection)(event*));
+    void listen_init(std::function<void(event*)>accept_connection);
     int wait();
 };
 
@@ -85,12 +87,3 @@ public:
     bool is_buf_full() const;
     void call_back();
 };
-
-void recv_data(event* ev);
-
-void send_data(event* ev);
-
-void accept_connection(event* ev);
-
-void test_recv_data(event* e);
-void test_send_data(event* e);
