@@ -15,8 +15,6 @@ void recv_data(event* ev);
 
 void send_data(event* ev);
 
-void accept_connection(event* ev);
-
 void test_recv_data(event* e);
 
 void test_send_data(event* e);

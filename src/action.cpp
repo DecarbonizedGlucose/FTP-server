@@ -1,54 +1,10 @@
 #include "../include/action.hpp"
 
-/* ---------- call back funcs ---------- */
+/* ---------- io funcs ---------- */
 
 void recv_data(event* ev) {}
 
 void send_data(event* ev) {}
-
-void accept_connection(event* ev) {
-    struct sockaddr_in client_addr = {0};
-    int i;
-    socklen_t addr_len = sizeof(client_addr);
-    int cfd = accept(ev->fd, (struct sockaddr*)&client_addr, &addr_len);
-    event* pe;
-    do {
-        if (cfd < 0) {
-            if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                return; // No more connections to accept
-            }
-            std::cerr << "Failed to accept connection: " << strerror(errno) << std::endl;
-            break;
-        }
-        for (i = 0; i < ev->p_rea->max_events; ++i) {
-            if (ev->p_rea->events[i] == nullptr) {
-                break; // Found an empty slot
-            }
-        }
-        if (i == ev->p_rea->max_events) {
-            std::cerr << "Max events reached, cannot accept more connections" << std::endl;
-            break;
-        }
-        int flag = fcntl(cfd, F_SETFL, O_NONBLOCK);
-        if (flag < 0) {
-            std::cerr << "Failed to set non-blocking mode: " << strerror(errno) << std::endl;
-            break;
-        }
-        pe = new event(cfd, EPOLLIN | EPOLLET, ev->p_rea->event_buf_size);
-        if (!pe) {
-            std::cerr << "Failed to create event for new connection" << std::endl;
-            break;
-        }
-        ev->p_rea->events[i] = pe;
-        pe->set(std::bind(test_recv_data, pe));
-        pe->apply_to_reactor(ev->p_rea);
-        // print message
-        std::cout << "Client connected: " << inet_ntoa(client_addr.sin_addr) << ":" << ntohs(client_addr.sin_port) << std::endl;
-        return;
-    } while (0);
-    close(cfd);
-    throw std::runtime_error("Failed to accept connection - " + std::string(strerror(errno)));
-}
 
 void test_recv_data(event* e) {
     if (!e || !e->p_rea) {

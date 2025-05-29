@@ -1,80 +1,4 @@
-#ifndef CLIENT_HPP
-#define CLIENT_HPP
-
-#include <string>
-#include <iostream>
-#include "../include/thread_pool.hpp"
-#include "../include/action.hpp"
-
-class Socket;
-class interface;
-class ftp_client;
-class file_manager;
-
-class interface {
-public:
-    ftp_client* p_client;
-    std::string command_num;
-    std::string control_info;
-    std::string data_info;
-    bool running;
-
-    interface(ftp_client* client) : p_client(client), running(false) {}
-    ~interface() = default;
-    void main_loop();
-    void un_menu();
-    void cd_menu();
-
-    void print_connection_info();
-    void change_dir(const std::string& dir_path);
-    void list_files();
-    void create_dir(const std::string& dir_name);
-    void send_request(const std::string& command);
-    void upload_file(const std::string& file_path);
-    void download_file(const std::string& file_path);
-    void delete_file(const std::string& file_path);
-};
-
-class file_manager {};
-
-class Socket {
-public:
-    int fd = -1;
-    std::string ip;
-    short port;
-    sa_family_t family = AF_INET;
-    struct sockaddr_in serv_addr;
-    char *buf = nullptr;
-    int buflen = 0;
-    int buffer_size = BUFSIZ;
-
-    Socket() = delete;
-    Socket(int fd, std::string ip, short port, sa_family_t family);
-    ~Socket();
-
-    bool connect();
-};
-
-class ftp_client {
-private:
-    friend class interface;
-    thread_pool* pool = nullptr;
-    interface ui = interface(this);
-    file_manager* fm = nullptr;
-    Socket* conn_socket = nullptr;
-    Socket* data_socket = nullptr;
-public:
-    bool cntl_connected = false;
-    bool data_connected = false;
-
-    ftp_client();
-    ~ftp_client();
-    void launch();
-    void cntl_connect();
-    void data_connect();
-    void cntl_disconnect();
-    void data_disconnect();
-};
+#include "../include/clientact.hpp"
 
 /* ---------- interface ---------- */
 
@@ -117,7 +41,7 @@ void interface::main_loop() {
             }
             else if (command_num == "4") {
                 // 发送文件管理请求
-                p_client->data_connect();
+                send_request();
                 system("pause");
             }
             else if (command_num == "5") {
@@ -173,8 +97,8 @@ void interface::cd_menu() {
 
 void interface::print_connection_info() {
     if (p_client->cntl_connected) {
-        std::cout << "Control Connection: " << p_client->conn_socket->ip << ":"
-                  << p_client->conn_socket->port << std::endl;
+        std::cout << "Control Connection: " << p_client->cntl_socket->ip << ":"
+                  << p_client->cntl_socket->port << std::endl;
     } else {
         std::cout << "No control connection established." << std::endl;
     }
@@ -192,8 +116,53 @@ void interface::create_dir(const std::string& dir_name) {
 
 }
 
-void interface::send_request(const std::string& command) {
-
+void interface::send_request() {
+    if (!p_client->cntl_connected) {
+        std::cerr << "Control connection not established. Please connect first." << std::endl;
+        return;
+    }
+    if (p_client->data_connected) {
+        std::cerr << "Data channel already created." << std::endl;
+        return;
+    }
+    sprintf(p_client->cntl_socket->buf, "PASV");
+    int len = p_client->cntl_socket->buflen = strlen(p_client->cntl_socket->buf);
+    int al = 0;
+    p_client->cntl_socket->write_size(p_client->cntl_socket->buflen);
+    while (len) {
+        int n = p_client->cntl_socket->swrite(len, al);
+        if (n <= 0) {
+            std::cerr << "Failed to send PASV command." << std::endl;
+            return;
+        }
+    }
+    len = p_client->cntl_socket->buflen = p_client->cntl_socket->read_size();
+    al = 0;
+    if (p_client->cntl_socket->buflen <= 0) {
+        std::cerr << "Failed to read response from server." << std::endl;
+        return;
+    }
+    while (len) {
+        int n = p_client->cntl_socket->sread(len, al);
+        if (n <= 0) {
+            std::cerr << "Failed to read PASV response." << std::endl;
+            return;
+        }
+    }
+    std::cout << "PASV response: " << p_client->cntl_socket->buf << std::endl;
+    short port;
+    port = ntohs(*(short*)(p_client->cntl_socket->buf + len - 2));
+    if (port <= 0) {
+        std::cerr << "Invalid port number received from server." << std::endl;
+        return;
+    }
+    if (!p_client->data_connect(port)) {
+        std::cerr << "Failed to connect to data channel." << std::endl;
+        return;
+    }
+    printf("227 Entering Passive Mode (%s:%d)\n",
+           p_client->data_socket->ip.c_str(), p_client->data_socket->port);
+           // 这后面改成那个形式
 }
 
 void interface::upload_file(const std::string& file_path) {
@@ -256,6 +225,47 @@ bool Socket::connect() {
     return true;
 }
 
+int Socket::read_size() {
+    int datasize;
+    int n = read_size_from(fd, &datasize);
+    if (n <= 0) {
+        return n;
+    }
+    return datasize;
+}
+
+int Socket::write_size(int datasize) {
+    return write_size_to(fd, &datasize);
+}
+
+int Socket::sread(int& leftsize, int& alreadyread) {
+    if (leftsize <= 0 || alreadyread < 0 || alreadyread >= buflen) {
+        std::cerr << "Invalid parameters for sread." << std::endl;
+        return -1;
+    }
+    int n = read_from(fd, buf + alreadyread, buffer_size, &buflen);
+    if (n <= 0) {
+        return n;
+    }
+    leftsize -= n;
+    alreadyread += n;
+    return n;
+}
+
+int Socket::swrite(int& leftsize, int& alreadywrite) {
+    if (leftsize <= 0 || alreadywrite < 0 || alreadywrite >= buflen) {
+        std::cerr << "Invalid parameters for swrite." << std::endl;
+        return -1;
+    }
+    int n = write_to(fd, buf + alreadywrite, buflen, &buflen);
+    if (n <= 0) {
+        return n;
+    }
+    leftsize -= n;
+    alreadywrite += n;
+    return n;
+}
+
 /* ---------- client ---------- */
 
 ftp_client::ftp_client() {
@@ -265,6 +275,26 @@ ftp_client::ftp_client() {
 }
 
 ftp_client::~ftp_client() {
+    ui.running = false;
+    if (pool) {
+        pool->shutdown();
+        delete pool;
+        pool = nullptr;
+    }
+    if (fm) {
+        delete fm;
+        fm = nullptr;
+    }
+    if (cntl_socket) {
+        delete cntl_socket;
+        cntl_socket = nullptr;
+    }
+    if (data_socket) {
+        delete data_socket;
+        data_socket = nullptr;
+    }
+    cntl_connected = false;
+    data_connected = false;
 }
 
 void ftp_client::launch() {
@@ -282,11 +312,11 @@ void ftp_client::cntl_connect() {
         std::cerr << "Invalid IP address or port." << std::endl;
         return;
     }
-    conn_socket = new Socket(socket(AF_INET, SOCK_STREAM, 0), server_ip, 2100);
-    if (!conn_socket->connect()) {
+    cntl_socket = new Socket(socket(AF_INET, SOCK_STREAM, 0), server_ip, 2100);
+    if (!cntl_socket->connect()) {
         std::cerr << "Failed to connect to server: " << server_ip << ":" << 2100 << std::endl;
-        delete conn_socket;
-        conn_socket = nullptr;
+        delete cntl_socket;
+        cntl_socket = nullptr;
         return;
     }
     cntl_connected = true;
@@ -298,8 +328,8 @@ void ftp_client::cntl_disconnect() {
         data_disconnect();
     }
     if (cntl_connected) {
-        delete conn_socket;
-        conn_socket = nullptr;
+        delete cntl_socket;
+        cntl_socket = nullptr;
         cntl_connected = false;
         std::cout << "Disconnected from control socket." << std::endl;
     } else {
@@ -307,24 +337,25 @@ void ftp_client::cntl_disconnect() {
     }
 }
 
-void ftp_client::data_connect() {
+bool ftp_client::data_connect(short port) {
     if (!cntl_connected) {
         std::cerr << "Control connection not established. Please connect first." << std::endl;
-        return;
+        return false;
     }
     if (data_connected) {
         std::cerr << "Data connection already established." << std::endl;
-        return;
+        return false;
     }
-    data_socket = new Socket(socket(AF_INET, SOCK_STREAM, 0), conn_socket->ip, 2101);
+    data_socket = new Socket(socket(AF_INET, SOCK_STREAM, 0), cntl_socket->ip, port);
     if (!data_socket->connect()) {
-        std::cerr << "Failed to connect to data socket: " << data_socket->ip << ":" << 2101 << std::endl;
+        std::cerr << "Failed to connect to data socket: " << data_socket->ip << ":" << port << std::endl;
         delete data_socket;
         data_socket = nullptr;
         return;
     }
     data_connected = true;
-    std::cout << "Data connection established: " << data_socket->ip << ":" << 2101 << std::endl;
+    std::cout << "Data connection established: " << data_socket->ip << ":" << port << std::endl;
+    return true;
 }
 
 void ftp_client::data_disconnect() {
@@ -340,5 +371,3 @@ void ftp_client::data_disconnect() {
         }
     }
 }
-
-#endif

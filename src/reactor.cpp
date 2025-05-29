@@ -173,7 +173,7 @@ reactor::~reactor() {
 
 //void reactor::listen_init() {}
 
-void reactor::listen_init(void (*accept_connection)(event*)) {
+void reactor::listen_init(void (*root_connection)(event*)) {
     struct sockaddr_in serv_addr = {0};
     serv_addr.sin_family = this->family;
     serv_addr.sin_port = htons(this->port);
@@ -208,7 +208,7 @@ void reactor::listen_init(void (*accept_connection)(event*)) {
             std::cerr << "Failed to create listen event" << std::endl;
             break;
         }
-        auto func = std::bind(accept_connection, listen_event);
+        auto func = std::bind(root_connection, listen_event);
         listen_event->set(std::move(func));
         listen_event->apply_to_reactor(this);
         this->events[this->max_events] = listen_event; // Store the listen event
@@ -220,7 +220,7 @@ void reactor::listen_init(void (*accept_connection)(event*)) {
     throw std::runtime_error("reactor::listen_init: Failed to create listening socket - " + std::string(strerror(errno)));
 }
 
-//void reactor::listen_init(std::function<void(event*)>accept_connection) {}
+//void reactor::listen_init(std::function<void(event*)>root_connection) {}
 
 int reactor::wait() {
 again:
@@ -234,4 +234,31 @@ again:
     else {
         return ret;
     }
+}
+
+bool reactor::add_event(event* ev) {
+    if (ev == nullptr) {
+        std::cerr << "Invalid event pointer" << std::endl;
+        return false;
+    }
+    for (int i = 0; i < this->max_events; ++i) {
+        if (this->events[i] == nullptr) {
+            this->events[i] = ev;
+            return true;
+        }
+    }
+}
+
+bool reactor::remove_event(event* ev) {
+    if (ev == nullptr) {
+        std::cerr << "Invalid event pointer" << std::endl;
+        return false;
+    }
+    for (int i = 0; i < this->max_events; ++i) {
+        if (this->events[i] == ev) {
+            this->events[i] = nullptr;
+            return true;
+        }
+    }
+    return false; // Event not found
 }

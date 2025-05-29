@@ -1,13 +1,11 @@
-#include "../include/thread_pool.hpp"
-#include "../include/server.hpp"
-#include <iostream>
-#include <stdexcept>
+#include "../include/serveract.hpp"
+
 
 int main() {
     reactor rea;
     thread_pool pool(8);
     pool.init();
-    rea.listen_init(accept_connection);
+    rea.listen_init(root_connection);
 
     int nready;
     event* l_event = rea.events.back();
