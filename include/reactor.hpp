@@ -32,7 +32,7 @@ class reactor {
 private:
     std::string ip = "";
     sa_family_t family = AF_INET;
-    short port = 8080;
+    short port = 0;
     int epoll_fd;
     int listen_fd;
 public:

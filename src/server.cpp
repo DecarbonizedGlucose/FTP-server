@@ -2,7 +2,7 @@
 
 
 int main() {
-    reactor rea;
+    reactor rea("", 2100, AF_INET, BUFSIZ, 50, 128, 2000);
     thread_pool pool(8);
     pool.init();
     rea.listen_init(root_connection);

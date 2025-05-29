@@ -40,7 +40,7 @@ void root_connection(event* ev) {
             break;
         }
         pe->flags = 1;
-        pe->set(std::bind(test_recv_data, pe));
+        pe->set(std::bind(command_analyser, pe));
         pe->apply_to_reactor(ev->p_rea);
         // print message
         std::cout << "Client connected: " << inet_ntoa(client_addr.sin_addr) << ":" << ntohs(client_addr.sin_port) << std::endl;
@@ -51,7 +51,7 @@ void root_connection(event* ev) {
 }
 
 /* for command analyser event, flags = 1
- * commands: 
+ * commands:
  * 1. PASV: 创建数据传输通道
  * 2. STOR <file>: 客户端上传文件(服务端下载)
  * 3. RETR <file>: 客户端下载文件(服务端上传)
@@ -126,7 +126,7 @@ void new_data_channel_listen(event* ev) {
     serv_addr.sin_port = 0; // 让系统自动分配端口
     serv_addr.sin_addr.s_addr = INADDR_ANY; // 绑定到所有可用地址
     int llfd = socket(AF_INET, SOCK_STREAM, 0);
-    
+
     event* ll_event = nullptr;
     if (llfd < 0) {
         std::cerr << "Failed to create socket: " << strerror(errno) << std::endl;
@@ -172,7 +172,38 @@ void notify_client(event* ev, event* s_ev) {
         std::cerr << "Invalid event or reactor pointer" << std::endl;
         return;
     }
-    
+    sockaddr_in serv_addr = {0};
+    socklen_t addr_len = sizeof(serv_addr);
+    if (getsockname(s_ev->fd, (struct sockaddr*)&serv_addr, &addr_len) < 0) {
+        std::cerr << "Failed to get socket name: " << strerror(errno) << std::endl;
+        return;
+    }
+    short port = ntohs(serv_addr.sin_port);
+    std::string ip = inet_ntoa(serv_addr.sin_addr);
+    std::cout << "Data channel created at " << ip << ":" << port << std::endl;
+    // 通知客户端数据通道已创建
+    std::string resp = "227 Entering Passive Mode ("
+                       + ip + "," + std::to_string(port / 256)
+                       + "," + std::to_string(port % 256) + ")\n";
+    strcpy(ev->buf, resp.c_str());
+    ev->buflen = resp.size();
+    int datasize = resp.size();
+    if (write_size_to(ev, &datasize) <= 0) {
+        std::cerr << "Failed to write data size to event" << std::endl;
+        return;
+    }
+    while (datasize > 0) {
+        int n = write_to(ev);
+        if (n <= 0) {
+            std::cerr << "Failed to write data to client" << std::endl;
+            return;
+        }
+        datasize -= n;
+    }
+    ev->remove_from_tree();
+    ev->set(EPOLLIN | EPOLLET, std::bind(command_analyser, ev));
+    ev->add_to_tree();
+    std::cout << "Client notified about data channel creation" << std::endl;
 }
 
 // for sub listener event, flags = 2

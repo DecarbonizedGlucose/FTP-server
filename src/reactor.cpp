@@ -247,6 +247,7 @@ bool reactor::add_event(event* ev) {
             return true;
         }
     }
+    return false; // 没空了
 }
 
 bool reactor::remove_event(event* ev) {

@@ -351,7 +351,7 @@ bool ftp_client::data_connect(short port) {
         std::cerr << "Failed to connect to data socket: " << data_socket->ip << ":" << port << std::endl;
         delete data_socket;
         data_socket = nullptr;
-        return;
+        return false;
     }
     data_connected = true;
     std::cout << "Data connection established: " << data_socket->ip << ":" << port << std::endl;

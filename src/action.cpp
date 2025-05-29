@@ -2,6 +2,7 @@
 
 /* ---------- io funcs ---------- */
 
+/*
 void recv_data(event* ev) {}
 
 void send_data(event* ev) {}
@@ -78,6 +79,7 @@ again:
     e->set(EPOLLIN | EPOLLET, std::move(func));
     e->add_to_tree();
 }
+*/
 
 int read_size_from(event* e, int* datasize) {
     if (!e || !e->p_rea) {
