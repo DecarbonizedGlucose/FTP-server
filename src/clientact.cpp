@@ -192,7 +192,7 @@ void interface::delete_file(const std::string& file_path) {
 /* ---------- socket ---------- */
 
 Socket::Socket(int fd, std::string ip, short port, sa_family_t family = AF_INET)
-    : fd(fd), ip(std::move(ip)), port(port), family(family) {
+    : fd(fd), ip(ip), port(port), family(family) {
     if (fd < 0) {
         throw std::invalid_argument("Invalid file descriptor - " + std::string(strerror(errno)));
     }
@@ -308,8 +308,9 @@ void ftp_client::cntl_connect() {
     std::cout << "Type in the server's ip address: ";
     std::string server_ip;
     std::getline(std::cin, server_ip);
+    std::cout << "You typed: " << '"' << server_ip << '"' << std::endl;
     if (server_ip.empty()) {
-        std::cerr << "Invalid IP address or port." << std::endl;
+        std::cerr << "Invalid IP address." << std::endl;
         return;
     }
     cntl_socket = new Socket(socket(AF_INET, SOCK_STREAM, 0), server_ip, 2100);

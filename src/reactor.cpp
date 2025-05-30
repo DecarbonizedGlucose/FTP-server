@@ -119,7 +119,11 @@ bool event::is_buf_full() const {
 
 void event::call_back() {
     if (call_back_func) {
-        call_back_func();
+        if (this->p_rea->pool) {
+            this->p_rea->pool->submit(std::move(call_back_func));
+        } else {
+            call_back_func();
+        }
     } else {
         std::cerr << "No callback function set for event on fd: " << fd << std::endl;
     }
@@ -133,7 +137,7 @@ reactor::reactor() {
         throw std::runtime_error("reactor::reactor: Failed to create epoll instance - " + std::string(strerror(errno)));
     }
     this->listen_fd = -1;
-    this->events.resize(this->max_events + 1, nullptr);
+    //this->events.resize(this->max_events + 1, nullptr);
     this->epoll_events = new struct epoll_event[max_events];
     if (!this->epoll_events) {
         throw std::runtime_error("Memory allocation failed for epoll events array - " + std::string(strerror(errno)));
@@ -144,7 +148,7 @@ reactor::reactor(
     std::string ip, short port, sa_family_t fam,
     int buf_size, int max_events,
     int max_clients, int epoll_timeout
-)   : ip(std::move(ip)), family(fam), port(port),
+)   : ip(ip), family(fam), port(port),
     event_buf_size(buf_size), max_events(max_events),
     max_clients(max_clients), epoll_timeout(epoll_timeout) {
     this->epoll_fd = epoll_create1(0);
@@ -152,7 +156,7 @@ reactor::reactor(
         throw std::runtime_error("reactor::reactor: Failed to create epoll instance - " + std::string(strerror(errno)));
     }
     this->listen_fd = -1;
-    this->events.resize(this->max_events + 1, nullptr);
+    //this->events.resize(this->max_events + 1, nullptr);
     this->epoll_events = new struct epoll_event[max_events];
     if (!this->epoll_events) {
         throw std::runtime_error("Memory allocation failed for epoll events array - " + std::string(strerror(errno)));
@@ -165,10 +169,17 @@ reactor::~reactor() {
         this->epoll_events = nullptr;
     }
     for (auto pe : this->events) {
-        delete pe;
-        pe = nullptr;
+        delete pe.second;
+        pe.second = nullptr;
     }
     this->epoll_fd = -1;
+}
+
+void reactor::add_pool(thread_pool* p) {
+    if (p == nullptr) {
+        throw std::invalid_argument("Thread pool pointer is null - " + std::string(strerror(errno)));
+    }
+    this->pool = p;
 }
 
 //void reactor::listen_init() {}
@@ -210,8 +221,7 @@ void reactor::listen_init(void (*root_connection)(event*)) {
         }
         auto func = std::bind(root_connection, listen_event);
         listen_event->set(std::move(func));
-        listen_event->apply_to_reactor(this);
-        this->events[this->max_events] = listen_event; // Store the listen event
+        add_event(listen_event);
         // print success message
         std::cout << "Listening on " << this->ip << ":" << this->port << std::endl;
         return;
@@ -241,11 +251,10 @@ bool reactor::add_event(event* ev) {
         std::cerr << "Invalid event pointer" << std::endl;
         return false;
     }
-    for (int i = 0; i < this->max_events; ++i) {
-        if (this->events[i] == nullptr) {
-            this->events[i] = ev;
-            return true;
-        }
+    if (this->events.size() < this->max_events + 1) {
+        this->events[ev->fd] = ev;
+        ev->apply_to_reactor(this);
+        return true;
     }
     return false; // 没空了
 }
@@ -255,11 +264,12 @@ bool reactor::remove_event(event* ev) {
         std::cerr << "Invalid event pointer" << std::endl;
         return false;
     }
-    for (int i = 0; i < this->max_events; ++i) {
-        if (this->events[i] == ev) {
-            this->events[i] = nullptr;
-            return true;
-        }
+    auto it = this->events.find(ev->fd);
+    if (it != this->events.end()) {
+        it->second->remove_from_tree();
+        delete it->second;
+        this->events.erase(it);
+        return true;
     }
-    return false; // Event not found
+    return false;
 }

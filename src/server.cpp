@@ -3,12 +3,13 @@
 
 int main() {
     reactor rea("", 2100, AF_INET, BUFSIZ, 50, 128, 2000);
-    thread_pool pool(8);
-    pool.init();
+    thread_pool* pool = new thread_pool(8);
+    pool->init();
+    rea.add_pool(pool);
     rea.listen_init(root_connection);
 
     int nready;
-    event* l_event = rea.events.back();
+    event* ev;
 
     while (true) {
         nready = rea.wait();
@@ -17,11 +18,12 @@ int main() {
             break;
         }
         for (int i = 0; i < nready; ++i) {
-            event* ev = static_cast<event*>(rea.epoll_events[i].data.ptr);
-            if (ev == l_event && ev->events & EPOLLIN) {
-                // Handle read event
-                ev->call_back_func();
+            ev = static_cast<event*>(rea.epoll_events[i].data.ptr);
+            if (ev == nullptr) {
+                std::cerr << "Event pointer is null" << std::endl;
+                continue;
             }
+            ev->call_back();
         }
     }
 

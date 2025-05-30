@@ -1,5 +1,7 @@
 #include "../include/serveract.hpp"
 #include "../include/action.hpp"
+#include <utility>
+#include <any>
 
 /*
  * reactor中event的flags标记：
@@ -7,6 +9,8 @@
  * 1: 命令控制事件，可以进行二级创建，或者读写并执行命令
  * 2: 二级监听，没什么用
  * 3: 文件传输读/写事件
+ * 1 -> 2-3
+ * 2 -> 1-3
 */
 
 // for root listener event, flags = 0
@@ -34,14 +38,14 @@ void root_connection(event* ev) {
             std::cerr << "Failed to create event for new connection" << std::endl;
             break;
         }
-        if (pe->p_rea->add_event(pe) == false) {
-            delete pe;
-            std::cerr << "Too many events." << std::endl;
+        pe->flags = 1;
+        pe->data = new std::pair<event*, event*>(nullptr, nullptr);
+        pe->set(std::bind(command_analyser, pe));
+        if (!ev->p_rea->add_event(pe)) {
+            std::cerr << "Failed to add event to reactor" << std::endl;
+            delete pe; // Clean up if adding fails
             break;
         }
-        pe->flags = 1;
-        pe->set(std::bind(command_analyser, pe));
-        pe->apply_to_reactor(ev->p_rea);
         // print message
         std::cout << "Client connected: " << inet_ntoa(client_addr.sin_addr) << ":" << ntohs(client_addr.sin_port) << std::endl;
         return;
@@ -68,6 +72,7 @@ void command_analyser(event* ev) {
         return;
     }
     // 如果这里循环读取更加严格
+    std::cout << "Command analyser started for event: " << ev->fd << std::endl;
     int datasize = 0;
     if (read_size_from(ev, &datasize) <= 0) {
         std::cerr << "Failed to read data size from event" << std::endl;
@@ -85,7 +90,7 @@ void command_analyser(event* ev) {
     std::cout << "Received command: " << command << std::endl;
     // 执行各种本地命令,设置next_event的值
     if (command == "PASV") { // 创建数据传输通道
-        //next_event = EPOLLOUT | EPOLLET;
+        new_data_channel_listen(ev);
     }
     else if (command.substr(0, 4) == "STOR") { // 服务端下载
         //next_event = EPOLLIN | EPOLLET;
@@ -94,23 +99,22 @@ void command_analyser(event* ev) {
         //next_event = EPOLLOUT | EPOLLET;
     }
     else if (command == "ls") { // 列出当前目录下的文件
-        //next_event = EPOLLOUT | EPOLLET;
-        //ev->call_back_func = std::bind(list_files, ev);
+        list_dir(ev);
     }
     else if (command.substr(0, 2) == "cd") { // 切换目录
-        //next_event = EPOLLIN | EPOLLET;
+        change_dir(ev, command.substr(3));
     }
-    else if (command.substr(0, 6) == "mkdir ") { // 创建目录
-        //next_event = EPOLLIN | EPOLLET;
+    else if (command.substr(0, 5) == "mkdir") { // 创建目录
+        create_dir(ev, command);
     }
-    else if (command.substr(0, 6) == "rmdir ") { // 删除目录
-        //next_event = EPOLLIN | EPOLLET;
+    else if (command.substr(0, 5) == "rmdir") { // 删除目录
+        remove_dir(ev, command);
     }
-    else if (command.substr(0, 3) == "rm ") { // 删除文件
-        //next_event = EPOLLIN | EPOLLET;
+    else if (command.substr(0, 2) == "rm") { // 删除文件
+        remove_file(ev, command);
     }
     else if (command == "dic") { // 断开通道
-        //next_event = EPOLLIN | EPOLLET;
+        disconnect(ev);
     }
     else {
         std::cerr << "Unknown command: " << command << std::endl;
@@ -119,7 +123,8 @@ void command_analyser(event* ev) {
 }
 
 // for command analyser event, flags = 1
-// 其实是上一个函数的延伸
+// command = "PASV"
+// next step: notify_client
 void new_data_channel_listen(event* ev) {
     struct sockaddr_in serv_addr = {0};
     serv_addr.sin_family = AF_INET;
@@ -147,14 +152,16 @@ void new_data_channel_listen(event* ev) {
             break;
         }
         ll_event->flags = 2; // 二级监听事件
-        if (ll_event->p_rea->add_event(ll_event) == false) {
-            break;
-        }
         auto ll_func = std::bind(create_data_channel, ll_event);
         ll_event->set(EPOLLIN | EPOLLET, std::move(ll_func));
-        ll_event->apply_to_reactor(ev->p_rea);
+        if (!ev->p_rea->add_event(ll_event)) {
+            std::cerr << "Failed to add event to reactor" << std::endl;
+            break;
+        }
         ev->remove_from_tree();
-        auto func = std::bind(notify_client, ev, ll_event);
+        auto func = std::bind(notify_client, ev);
+        std::any_cast<std::pair<event*, event*>*>(ev->data)->first = ll_event;
+        std::any_cast<std::pair<event*, event*>*>(ll_event->data)->first = ev;
         ev->set(EPOLLOUT | EPOLLET, func);
         ev->add_to_tree();
         return;
@@ -167,11 +174,12 @@ void new_data_channel_listen(event* ev) {
 }
 
 // for command analyser event, flags = 1
-void notify_client(event* ev, event* s_ev) {
+void notify_client(event* ev) {
     if (!ev || !ev->p_rea) {
         std::cerr << "Invalid event or reactor pointer" << std::endl;
         return;
     }
+    event* s_ev = std::any_cast<std::pair<event*, event*>*>(ev->data)->second;
     sockaddr_in serv_addr = {0};
     socklen_t addr_len = sizeof(serv_addr);
     if (getsockname(s_ev->fd, (struct sockaddr*)&serv_addr, &addr_len) < 0) {
@@ -233,11 +241,12 @@ void create_data_channel(event* ev) {
             break;
         }
         nc_event->flags = 3; // 文件传输读/写事件
-        if (nc_event->p_rea->add_event(nc_event) == false) {
+        nc_event->set(EPOLLIN | EPOLLET);
+        if (ev->p_rea->add_event(nc_event) == false) {
             break;
         }
-        nc_event->apply_to_reactor(ev->p_rea);
-        // 设置回调函数
+        std::any_cast<std::pair<event*, event*>*>(ev->data)->second = nc_event;
+        // 设置回调函数 ??????????
         return;
     } while (0);
     if (new_cfd > 0) {

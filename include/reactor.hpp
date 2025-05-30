@@ -19,7 +19,10 @@
 #include <memory>
 #include <iostream>
 #include <vector>
+#include <unordered_map>
 #include <any>
+
+#include "../include/thread_pool.hpp"
 
 namespace net {
     const int max_open_files = 1024;
@@ -37,12 +40,14 @@ private:
     int listen_fd;
 public:
     friend class event;
-    std::vector<event*> events;
+    std::unordered_map<int, event*> events; // 使用unordered_map来存储事件
     struct epoll_event* epoll_events = nullptr;
     int max_events = 50;
     int max_clients = 128;
     int epoll_timeout = 2000; // milliseconds
     int event_buf_size = BUFSIZ;
+
+    thread_pool* pool = nullptr;
 
     reactor();
     reactor(std::string ip, short port, sa_family_t fam,
@@ -53,12 +58,16 @@ public:
     reactor& operator=(reactor&&) = delete;
     ~reactor();
 
+    void add_pool(thread_pool* p);
     //void listen_init();
     void listen_init(void (*root_connection)(event*));
     //void listen_init(std::function<void(event*)>root_connection);
     int wait();
     bool add_event(event* ev);
     bool remove_event(event* ev);
+
+    int get_listen_fd() const { return listen_fd; }
+    int get_epoll_fd() const { return epoll_fd; }
 };
 
 class event {
