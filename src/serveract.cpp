@@ -74,7 +74,11 @@ void command_analyser(event* ev) {
     // 如果这里循环读取更加严格
     std::cout << "Command analyser started for event: " << ev->fd << std::endl;
     int datasize = 0;
-    if (read_size_from(ev, &datasize) <= 0) {
+    int ret;
+    do {
+        ret = read_size_from(ev, &datasize);
+    } while (ret == 0);
+    if (ret <= 0) {
         std::cerr << "Failed to read data size from event" << std::endl;
         return;
     }
@@ -82,7 +86,10 @@ void command_analyser(event* ev) {
         std::cerr << "Invalid data size: " << datasize << std::endl;
         return;
     }
-    if (read_from(ev) <= 0) {
+    do {
+        ret = read_from(ev);
+    } while (ret == 0);
+    if (ret <= 0) {
         std::cerr << "Failed to read data from event" << std::endl;
         return;
     }
@@ -152,8 +159,9 @@ void new_data_channel_listen(event* ev) {
             break;
         }
         ll_event->flags = 2; // 二级监听事件
+        ll_event->data = new std::pair<event*, event*>(ev, nullptr);
         auto ll_func = std::bind(create_data_channel, ll_event);
-        ll_event->set(EPOLLIN | EPOLLET, std::move(ll_func));
+        ll_event->set(EPOLLIN | EPOLLET, ll_func);
         if (!ev->p_rea->add_event(ll_event)) {
             std::cerr << "Failed to add event to reactor" << std::endl;
             break;
@@ -161,7 +169,6 @@ void new_data_channel_listen(event* ev) {
         ev->remove_from_tree();
         auto func = std::bind(notify_client, ev);
         std::any_cast<std::pair<event*, event*>*>(ev->data)->first = ll_event;
-        std::any_cast<std::pair<event*, event*>*>(ll_event->data)->first = ev;
         ev->set(EPOLLOUT | EPOLLET, func);
         ev->add_to_tree();
         return;
@@ -179,7 +186,7 @@ void notify_client(event* ev) {
         std::cerr << "Invalid event or reactor pointer" << std::endl;
         return;
     }
-    event* s_ev = std::any_cast<std::pair<event*, event*>*>(ev->data)->second;
+    event* s_ev = std::any_cast<std::pair<event*, event*>*>(ev->data)->first;
     sockaddr_in serv_addr = {0};
     socklen_t addr_len = sizeof(serv_addr);
     if (getsockname(s_ev->fd, (struct sockaddr*)&serv_addr, &addr_len) < 0) {
@@ -196,18 +203,22 @@ void notify_client(event* ev) {
     strcpy(ev->buf, resp.c_str());
     ev->buflen = resp.size();
     int datasize = resp.size();
-    if (write_size_to(ev, &datasize) <= 0) {
+    int ret;
+    do {
+        ret = write_size_to(ev, &datasize);
+    } while (ret == 0);
+    if (ret < 0) {
         std::cerr << "Failed to write data size to event" << std::endl;
         return;
     }
-    while (datasize > 0) {
-        int n = write_to(ev);
-        if (n <= 0) {
+    do {
+        ret = write_to(ev);
+        if (ret < 0) {
             std::cerr << "Failed to write data to client" << std::endl;
             return;
         }
-        datasize -= n;
-    }
+        datasize -= ret;
+    } while (datasize > 0 || ret == 0);
     ev->remove_from_tree();
     ev->set(EPOLLIN | EPOLLET, std::bind(command_analyser, ev));
     ev->add_to_tree();
@@ -258,3 +269,26 @@ void create_data_channel(event* ev) {
     }
 }
 
+// for file transfer event, flags = 3
+void download(event* ev) {}
+
+// for file transfer event, flags = 3
+void upload(event* ev) {}
+
+// for command analyser event, flags = 1
+void list_dir(event* ev) {}
+
+// for command analyser event, flags = 1
+void change_dir(event* ev, std::string arg) {}
+
+// for command analyser event, flags = 1
+void create_dir(event* ev, std::string arg) {}
+
+// for command analyser event, flags = 1
+void remove_dir(event* ev, std::string arg) {}
+
+// for command analyser event, flags = 1
+void remove_file(event* ev, std::string arg) {}
+
+// for command analyser event, flags = 1
+void disconnect(event*ev) {}

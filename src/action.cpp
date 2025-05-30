@@ -53,7 +53,7 @@ void test_recv_data(event* e) {
     }
     auto func = std::bind(test_send_data, e);
     e->remove_from_tree();
-    e->set(EPOLLOUT | EPOLLET, std::move(func));
+    e->set(EPOLLOUT | EPOLLET, func);
     e->add_to_tree();
 }
 
@@ -76,7 +76,7 @@ again:
     std::cout << "Sent: " << e->buf << " to client " << e->fd << std::endl;
     auto func = std::bind(test_recv_data, e);
     e->remove_from_tree();
-    e->set(EPOLLIN | EPOLLET, std::move(func));
+    e->set(EPOLLIN | EPOLLET, func);
     e->add_to_tree();
 }
 */
@@ -84,7 +84,7 @@ again:
 int read_size_from(event* e, int* datasize) {
     if (!e || !e->p_rea) {
         std::cerr << "Invalid event or reactor pointer" << std::endl;
-        return false;
+        return -1;
     }
     int n;
 again:
@@ -99,7 +99,7 @@ again:
         }
         else {
             std::cerr << "Read error: " << strerror(errno) << std::endl;
-            return 0;
+            return -1;
         }
     }
     else if (n == 0) {
@@ -110,7 +110,7 @@ again:
         std::cerr << "Read size mismatch: expected " << sizeof(int) << ", got " << n << std::endl;
         return 0;
     }
-    return 1;
+    return n;
 }
 
 int read_size_from(int fd, int* datasize) {
@@ -131,7 +131,7 @@ again:
         }
         else {
             std::cerr << "Read error: " << strerror(errno) << std::endl;
-            return 0;
+            return -1;
         }
     }
     else if (n == 0) {
@@ -142,7 +142,7 @@ again:
         std::cerr << "Read size mismatch: expected " << sizeof(int) << ", got " << n << std::endl;
         return 0;
     }
-    return 1;
+    return n;
 }
 
 int write_size_to(event* e, int* datasize) {
@@ -157,6 +157,10 @@ again:
         if (errno == EINTR) {
             goto again;
         }
+        else if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            std::cerr << "No space available to write to client: " << e->fd << std::endl;
+            return 0;
+        }
         else {
             std::cerr << "Write error: " << strerror(errno) << std::endl;
             return -1;
@@ -166,7 +170,7 @@ again:
         std::cerr << "Write size mismatch: expected " << sizeof(int) << ", got " << n << std::endl;
         return -1;
     }
-    return 1;
+    return n;
 }
 
 int write_size_to(int fd, int* datasize) {
@@ -177,6 +181,10 @@ again:
         if (errno == EINTR) {
             goto again;
         }
+        else if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            std::cerr << "No space available to write to fd: " << fd << std::endl;
+            return 0;
+        }
         else {
             std::cerr << "Write error: " << strerror(errno) << std::endl;
             return -1;
@@ -186,7 +194,7 @@ again:
         std::cerr << "Write size mismatch: expected " << sizeof(int) << ", got " << n << std::endl;
         return -1;
     }
-    return 1;
+    return n;
 }
 
 int read_from(event* e) {
@@ -261,6 +269,10 @@ again:
         if (errno == EINTR) {
             goto again;
         }
+        else if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            std::cerr << "No space available to write to client: " << e->fd << std::endl;
+            return 0;
+        }
         else {
             std::cerr << "Write error: " << strerror(errno) << std::endl;
             return -1;
@@ -284,6 +296,10 @@ again:
     if (n == -1) {
         if (errno == EINTR) {
             goto again;
+        }
+        else if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            std::cerr << "No space available to write to fd: " << fd << std::endl;
+            return 0;
         }
         else {
             std::cerr << "Write error: " << strerror(errno) << std::endl;

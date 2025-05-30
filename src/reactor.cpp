@@ -40,8 +40,9 @@ event::~event() {
 void event::set(int new_events, std::function<void()> call_back_func) {
     this->events = new_events;
     if (call_back_func) {
-        this->call_back_func = std::move(call_back_func);
+        this->call_back_func = call_back_func;
     } else {
+        std::cerr << "Warning: Callback function is null, setting to nullptr." << std::endl;
         this->call_back_func = nullptr;
     }
 }
@@ -52,8 +53,9 @@ void event::set(int new_events) {
 
 void event::set(std::function<void()> call_back_func) {
     if (call_back_func) {
-        this->call_back_func = std::move(call_back_func);
+        this->call_back_func = call_back_func;
     } else {
+        std::cerr << "Warning: Callback function is null, setting to nullptr." << std::endl;
         this->call_back_func = nullptr;
     }
 }
@@ -120,7 +122,7 @@ bool event::is_buf_full() const {
 void event::call_back() {
     if (call_back_func) {
         if (this->p_rea->pool) {
-            this->p_rea->pool->submit(std::move(call_back_func));
+            this->p_rea->pool->submit(call_back_func);
         } else {
             call_back_func();
         }
@@ -220,7 +222,7 @@ void reactor::listen_init(void (*root_connection)(event*)) {
             break;
         }
         auto func = std::bind(root_connection, listen_event);
-        listen_event->set(std::move(func));
+        listen_event->set(func);
         add_event(listen_event);
         // print success message
         std::cout << "Listening on " << this->ip << ":" << this->port << std::endl;

@@ -53,8 +53,8 @@ public:
     ~Socket();
 
     bool connect();
-    int read_size();
-    int write_size(int datasize);
+    int read_size(int *datasize);
+    int write_size(int* datasize);
     int sread(int& leftsize, int& alreadyread);
     int swrite(int& leftsize, int& alreadywrite);
 };

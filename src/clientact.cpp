@@ -4,7 +4,7 @@
 
 void interface::main_loop() {
     while (running) {
-        system("clear");
+        //system("clear");
         if (!p_client->cntl_connected) {
             un_menu();
             std::cout << "Please enter a command: ";
@@ -12,7 +12,7 @@ void interface::main_loop() {
 
             if (command_num == "1") {
                 p_client->cntl_connect();
-                system("pause");
+                //system("pause");
             } else if (command_num == "2") {
                 running = false;
                 break;
@@ -42,7 +42,7 @@ void interface::main_loop() {
             else if (command_num == "4") {
                 // 发送文件管理请求
                 send_request();
-                system("pause");
+                //system("pause");
             }
             else if (command_num == "5") {
                 // Call upload file function here
@@ -127,28 +127,32 @@ void interface::send_request() {
     }
     sprintf(p_client->cntl_socket->buf, "PASV");
     int len = p_client->cntl_socket->buflen = strlen(p_client->cntl_socket->buf);
-    int al = 0;
-    p_client->cntl_socket->write_size(p_client->cntl_socket->buflen);
-    while (len) {
+    int al = 0, n;
+    p_client->cntl_socket->write_size(&len);
+    do {
         int n = p_client->cntl_socket->swrite(len, al);
-        if (n <= 0) {
+        if (n < 0) {
             std::cerr << "Failed to send PASV command." << std::endl;
             return;
         }
+    } while (len || n == 0);
+    if (p_client->cntl_socket->read_size(&len) < 0) {
+        std::cerr << "Failed to read response size from server." << std::endl;
+        return;
     }
-    len = p_client->cntl_socket->buflen = p_client->cntl_socket->read_size();
+    p_client->cntl_socket->buflen = len;
     al = 0;
     if (p_client->cntl_socket->buflen <= 0) {
         std::cerr << "Failed to read response from server." << std::endl;
         return;
     }
-    while (len) {
-        int n = p_client->cntl_socket->sread(len, al);
-        if (n <= 0) {
+    do {
+        n = p_client->cntl_socket->sread(len, al);
+        if (n < 0) {
             std::cerr << "Failed to read PASV response." << std::endl;
             return;
         }
-    }
+    } while (len || n == 0);
     std::cout << "PASV response: " << p_client->cntl_socket->buf << std::endl;
     short port;
     port = ntohs(*(short*)(p_client->cntl_socket->buf + len - 2));
@@ -225,27 +229,34 @@ bool Socket::connect() {
     return true;
 }
 
-int Socket::read_size() {
-    int datasize;
-    int n = read_size_from(fd, &datasize);
-    if (n <= 0) {
-        return n;
-    }
-    return datasize;
+int Socket::read_size(int* datasize) {
+    int ret;
+    do {
+        ret = read_size_from(fd, datasize);
+    } while (ret == 0);
+    return ret;
 }
 
-int Socket::write_size(int datasize) {
-    return write_size_to(fd, &datasize);
+int Socket::write_size(int* datasize) {
+    int ret;
+    do {
+        ret =  write_size_to(fd, datasize);
+    } while (ret == 0);
+    return ret;
 }
 
 int Socket::sread(int& leftsize, int& alreadyread) {
-    if (leftsize <= 0 || alreadyread < 0 || alreadyread >= buflen) {
+    if (leftsize <= 0 || alreadyread < 0 || alreadyread > buflen) {
         std::cerr << "Invalid parameters for sread." << std::endl;
         return -1;
     }
-    int n = read_from(fd, buf + alreadyread, buffer_size, &buflen);
-    if (n <= 0) {
-        return n;
+    int n;
+    do {
+        read_from(fd, buf + alreadyread, buffer_size, &buflen);
+    } while (n == 0);
+    if (n < 0) {
+        std::cerr << "Read error in Socket::sread: " << strerror(errno) << std::endl;
+        return -1;
     }
     leftsize -= n;
     alreadyread += n;
@@ -257,8 +268,11 @@ int Socket::swrite(int& leftsize, int& alreadywrite) {
         std::cerr << "Invalid parameters for swrite." << std::endl;
         return -1;
     }
-    int n = write_to(fd, buf + alreadywrite, buflen, &buflen);
-    if (n <= 0) {
+    int n;
+    do {
+        write_to(fd, buf + alreadywrite, buflen, &buflen);
+    } while (n == 0);
+    if (n < 0) {
         return n;
     }
     leftsize -= n;
