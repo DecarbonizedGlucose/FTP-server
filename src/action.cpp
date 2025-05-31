@@ -94,7 +94,7 @@ again:
             goto again;
         }
         else if (errno == EAGAIN || errno == EWOULDBLOCK) {
-            std::cerr << "No data available to read from client: " << e->fd << std::endl;
+            //std::cerr << "No data available to read from client: " << e->fd << std::endl;
             return 0;
         }
         else {
@@ -126,7 +126,7 @@ again:
             goto again;
         }
         else if (errno == EAGAIN || errno == EWOULDBLOCK) {
-            std::cerr << "No data available to read from fd: " << fd << std::endl;
+            //std::cerr << "No data available to read from fd: " << fd << std::endl;
             return 0;
         }
         else {
@@ -158,7 +158,7 @@ again:
             goto again;
         }
         else if (errno == EAGAIN || errno == EWOULDBLOCK) {
-            std::cerr << "No space available to write to client: " << e->fd << std::endl;
+            //std::cerr << "No space available to write to client: " << e->fd << std::endl;
             return 0;
         }
         else {
@@ -182,7 +182,7 @@ again:
             goto again;
         }
         else if (errno == EAGAIN || errno == EWOULDBLOCK) {
-            std::cerr << "No space available to write to fd: " << fd << std::endl;
+            //std::cerr << "No space available to write to fd: " << fd << std::endl;
             return 0;
         }
         else {
@@ -210,7 +210,7 @@ again:
             goto again;
         }
         else if (errno == EAGAIN || errno == EWOULDBLOCK) {
-            std::cerr << "No data available to read from client: " << e->fd << std::endl;
+            //std::cerr << "No data available to read from client: " << e->fd << std::endl;
             return 0;
         }
         else {
@@ -240,7 +240,7 @@ again:
             goto again;
         }
         else if (errno == EAGAIN || errno == EWOULDBLOCK) {
-            std::cerr << "No data available to read from client: " << fd << std::endl;
+            //std::cerr << "No data available to read from client: " << fd << std::endl;
             return 0;
         }
         else {
@@ -270,7 +270,7 @@ again:
             goto again;
         }
         else if (errno == EAGAIN || errno == EWOULDBLOCK) {
-            std::cerr << "No space available to write to client: " << e->fd << std::endl;
+            //std::cerr << "No space available to write to client: " << e->fd << std::endl;
             return 0;
         }
         else {
@@ -298,7 +298,7 @@ again:
             goto again;
         }
         else if (errno == EAGAIN || errno == EWOULDBLOCK) {
-            std::cerr << "No space available to write to fd: " << fd << std::endl;
+            //std::cerr << "No space available to write to fd: " << fd << std::endl;
             return 0;
         }
         else {

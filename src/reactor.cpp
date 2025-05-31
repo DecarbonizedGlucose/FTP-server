@@ -147,7 +147,7 @@ reactor::reactor() {
 }
 
 reactor::reactor(
-    std::string ip, short port, sa_family_t fam,
+    std::string ip, uint16_t port, sa_family_t fam,
     int buf_size, int max_events,
     int max_clients, int epoll_timeout
 )   : ip(ip), family(fam), port(port),

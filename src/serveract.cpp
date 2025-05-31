@@ -193,7 +193,7 @@ void notify_client(event* ev) {
         std::cerr << "Failed to get socket name: " << strerror(errno) << std::endl;
         return;
     }
-    short port = ntohs(serv_addr.sin_port);
+    uint16_t port = ntohs(serv_addr.sin_port);
     std::string ip = inet_ntoa(serv_addr.sin_addr);
     std::cout << "Data channel created at " << ip << ":" << port << std::endl;
     // 通知客户端数据通道已创建
@@ -253,11 +253,12 @@ void create_data_channel(event* ev) {
         }
         nc_event->flags = 3; // 文件传输读/写事件
         nc_event->set(EPOLLIN | EPOLLET);
+        // 不对nc_event设置回调函数，因为它会在文件传输时被手动调用
         if (ev->p_rea->add_event(nc_event) == false) {
             break;
         }
         std::any_cast<std::pair<event*, event*>*>(ev->data)->second = nc_event;
-        // 设置回调函数 ??????????
+        // 不再次设置回调函数
         return;
     } while (0);
     if (new_cfd > 0) {

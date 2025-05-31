@@ -125,24 +125,35 @@ void interface::send_request() {
         std::cerr << "Data channel already created." << std::endl;
         return;
     }
+    // 发送 PASV 命令
     sprintf(p_client->cntl_socket->buf, "PASV");
     int len = p_client->cntl_socket->buflen = strlen(p_client->cntl_socket->buf);
     int al = 0, n;
-    p_client->cntl_socket->write_size(&len);
     do {
-        int n = p_client->cntl_socket->swrite(len, al);
+        n = p_client->cntl_socket->write_size(&len);
+        if (n < 0) {
+            std::cerr << "Failed to write size to control socket." << std::endl;
+            return;
+        }
+    } while (n == 0);
+    do {
+        n = p_client->cntl_socket->swrite(len, al);
         if (n < 0) {
             std::cerr << "Failed to send PASV command." << std::endl;
             return;
         }
     } while (len || n == 0);
-    if (p_client->cntl_socket->read_size(&len) < 0) {
-        std::cerr << "Failed to read response size from server." << std::endl;
-        return;
-    }
+    // 读取 PASV 响应
+    do {
+        n = p_client->cntl_socket->read_size(&len);
+        if (n < 0) {
+            std::cerr << "Failed to read response size from server." << std::endl;
+            return;
+        }
+    } while (n == 0);
     p_client->cntl_socket->buflen = len;
     al = 0;
-    if (p_client->cntl_socket->buflen <= 0) {
+    if (len <= 0) {
         std::cerr << "Failed to read response from server." << std::endl;
         return;
     }
@@ -154,12 +165,15 @@ void interface::send_request() {
         }
     } while (len || n == 0);
     std::cout << "PASV response: " << p_client->cntl_socket->buf << std::endl;
-    short port;
-    port = ntohs(*(short*)(p_client->cntl_socket->buf + len - 2));
+    uint16_t port, p1, p2;
+    sscanf(p_client->cntl_socket->buf, "227 Entering Passive Mode (%*d,%*d,%*d,%*d,%hu,%hu)", &p1, &p2);
+    port = p1 * 256 + p2;
+    std::cout << "Data channel addr: " << p_client->cntl_socket->ip << ":" << port << std::endl;
     if (port <= 0) {
         std::cerr << "Invalid port number received from server." << std::endl;
         return;
     }
+    // 连接数据通道
     if (!p_client->data_connect(port)) {
         std::cerr << "Failed to connect to data channel." << std::endl;
         return;
@@ -195,7 +209,7 @@ void interface::delete_file(const std::string& file_path) {
 
 /* ---------- socket ---------- */
 
-Socket::Socket(int fd, std::string ip, short port, sa_family_t family = AF_INET)
+Socket::Socket(int fd, std::string ip, uint16_t port, sa_family_t family = AF_INET)
     : fd(fd), ip(ip), port(port), family(family) {
     if (fd < 0) {
         throw std::invalid_argument("Invalid file descriptor - " + std::string(strerror(errno)));
@@ -217,6 +231,11 @@ Socket::~Socket() {
         close(fd);
         fd = -1;
     }
+    if (buf) {
+        delete[] buf;
+        buf = nullptr;
+    }
+    buflen = 0;
 }
 
 bool Socket::connect() {
@@ -252,7 +271,7 @@ int Socket::sread(int& leftsize, int& alreadyread) {
     }
     int n;
     do {
-        read_from(fd, buf + alreadyread, buffer_size, &buflen);
+        n = read_from(fd, buf + alreadyread, buffer_size, &buflen);
     } while (n == 0);
     if (n < 0) {
         std::cerr << "Read error in Socket::sread: " << strerror(errno) << std::endl;
@@ -270,7 +289,7 @@ int Socket::swrite(int& leftsize, int& alreadywrite) {
     }
     int n;
     do {
-        write_to(fd, buf + alreadywrite, buflen, &buflen);
+        n = write_to(fd, buf + alreadywrite, buflen, &buflen);
     } while (n == 0);
     if (n < 0) {
         return n;
@@ -286,10 +305,11 @@ ftp_client::ftp_client() {
     pool = new thread_pool(4, 8);
     pool->init();
     fm = new file_manager();
+    ui = new interface(this);
 }
 
 ftp_client::~ftp_client() {
-    ui.running = false;
+    ui->running = false;
     if (pool) {
         pool->shutdown();
         delete pool;
@@ -313,8 +333,8 @@ ftp_client::~ftp_client() {
 
 void ftp_client::launch() {
     pool->init();
-    ui.running = true;
-    ui.main_loop();
+    ui->running = true;
+    ui->main_loop();
     pool->shutdown();
 }
 
@@ -352,7 +372,7 @@ void ftp_client::cntl_disconnect() {
     }
 }
 
-bool ftp_client::data_connect(short port) {
+bool ftp_client::data_connect(uint16_t port) {
     if (!cntl_connected) {
         std::cerr << "Control connection not established. Please connect first." << std::endl;
         return false;

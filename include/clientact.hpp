@@ -41,7 +41,7 @@ class Socket {
 public:
     int fd = -1;
     std::string ip;
-    short port;
+    uint16_t port;
     sa_family_t family = AF_INET;
     struct sockaddr_in serv_addr;
     char *buf = nullptr;
@@ -49,7 +49,7 @@ public:
     int buffer_size = BUFSIZ;
 
     Socket() = delete;
-    Socket(int fd, std::string ip, short port, sa_family_t family);
+    Socket(int fd, std::string ip, uint16_t port, sa_family_t family);
     ~Socket();
 
     bool connect();
@@ -63,7 +63,7 @@ class ftp_client {
 private:
     friend class interface;
     thread_pool* pool = nullptr;
-    interface ui = interface(this);
+    interface* ui = nullptr;
     file_manager* fm = nullptr;
     Socket* cntl_socket = nullptr;
     Socket* data_socket = nullptr;
@@ -75,7 +75,7 @@ public:
     ~ftp_client();
     void launch();
     void cntl_connect();
-    bool data_connect(short port);
+    bool data_connect(uint16_t port);
     void cntl_disconnect();
     void data_disconnect();
 };

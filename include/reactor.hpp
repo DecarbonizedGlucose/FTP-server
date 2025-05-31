@@ -35,7 +35,7 @@ class reactor {
 private:
     std::string ip = "";
     sa_family_t family = AF_INET;
-    short port = 0;
+    uint16_t port = 0;
     int epoll_fd;
     int listen_fd;
 public:
@@ -50,7 +50,7 @@ public:
     thread_pool* pool = nullptr;
 
     reactor();
-    reactor(std::string ip, short port, sa_family_t fam,
+    reactor(std::string ip, uint16_t port, sa_family_t fam,
             int buf_size, int max_events, int max_clnts, int timeout);
     reactor(const reactor&) = delete;
     reactor(reactor&&) = delete;
