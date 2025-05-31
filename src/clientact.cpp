@@ -1,4 +1,5 @@
 #include "../include/clientact.hpp"
+#include <regex>
 
 /* ---------- interface ---------- */
 
@@ -166,7 +167,20 @@ void interface::send_request() {
     } while (len || n == 0);
     std::cout << "PASV response: " << p_client->cntl_socket->buf << std::endl;
     uint16_t port, p1, p2;
-    sscanf(p_client->cntl_socket->buf, "227 Entering Passive Mode (%*d,%*d,%*d,%*d,%hu,%hu)", &p1, &p2);
+    std::string resp = p_client->cntl_socket->buf;
+    std::regex regex("227 Entering Passive Mode \\((\\d+),(\\d+),(\\d+),(\\d+),(\\d+),(\\d+)\\)");
+    std::smatch match;
+    if (std::regex_search(resp, match, regex) && match.size() == 7) {
+        p1 = std::stoi(match[5].str());
+        p2 = std::stoi(match[6].str());
+    } else {
+        std::cerr << "Failed to parse PASV response." << std::endl;
+        return;
+    }
+    if (p1 < 0 || p1 > 255 || p2 < 0 || p2 > 255) {
+        std::cerr << "Invalid port numbers received from server." << std::endl;
+        return;
+    }
     port = p1 * 256 + p2;
     std::cout << "Data channel addr: " << p_client->cntl_socket->ip << ":" << port << std::endl;
     if (port <= 0) {
