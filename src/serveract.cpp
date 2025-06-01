@@ -2,6 +2,7 @@
 #include "../include/action.hpp"
 #include <utility>
 #include <any>
+#include <algorithm>
 
 /*
  * reactor中event的flags标记：
@@ -199,7 +200,8 @@ void notify_client(event* ev) {
     // 通知客户端数据通道已创建
     std::string resp = "227 Entering Passive Mode ("
                        + ip + "," + std::to_string(port / 256)
-                       + "," + std::to_string(port % 256) + ")\n";
+                       + "," + std::to_string(port % 256) + ")";
+    std::replace(resp.begin(), resp.end(), '.', ','); // 替换IP地址中的点为逗号
     strcpy(ev->buf, resp.c_str());
     ev->buflen = resp.size();
     int datasize = resp.size();
