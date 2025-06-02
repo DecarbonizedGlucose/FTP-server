@@ -25,17 +25,22 @@ public:
     void un_menu();
     void cd_menu();
 
-    void print_connection_info();
-    void change_dir(const std::string& dir_path);
-    void list_files();
-    void create_dir(const std::string& dir_name);
-    void send_request(); // PASV command
-    void upload_file(const std::string& file_path);
-    void download_file(const std::string& file_path);
-    void delete_file(const std::string& file_path);
-};
+    void send_request(); // PASV command and create data channel
+    void close_data_channel();
+    void disconnect(); // Disconnect from server
 
-class file_manager {};
+    void send_message(const std::string& msg);
+    void recv_message(std::string& msg);
+
+    void print_connection_info();
+    void change_dir();
+    void list_files();
+    void create_dir();
+    void remove_dir();
+    void upload_file();
+    void download_file();
+    void delete_file();
+};
 
 class Socket {
 public:

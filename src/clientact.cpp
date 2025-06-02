@@ -27,38 +27,41 @@ void interface::main_loop() {
             std::getline(std::cin, command_num);
             if (command_num == "1") {
                 // 切换目录
-                std::cout << "Enter directory path: ";
-                std::string dir_path;
-                std::getline(std::cin, dir_path);
+                this->change_dir();
             }
             else if (command_num == "2") {
                 // 远程ls命令
+                this->list_files();
             }
             else if (command_num == "3") {
                 // 创建目录
-                std::cout << "Enter new directory name: ";
-                std::string dir_name;
-                std::getline(std::cin, dir_name);
+                this->create_dir();
             }
             else if (command_num == "4") {
-                // 发送文件管理请求
-                send_request();
-                //system("pause");
+                // 删除目录
+                this->remove_dir();
             }
             else if (command_num == "5") {
-                // Call upload file function here
+                // 发送文件管理请求
+                this->send_request();
             }
             else if (command_num == "6") {
-                // Call download file function here
+                // Call upload file function here
             }
             else if (command_num == "7") {
-                // Call delete file function here
+                // Call download file function here
             }
             else if (command_num == "8") {
-                p_client->data_disconnect();
+                // 删除文件
+                this->delete_file();
             }
             else if (command_num == "9") {
-                p_client->cntl_disconnect();
+                // 关闭数据通道
+                this->close_data_channel();
+            }
+            else if (command_num == "0") {
+                // 断开连接
+                this->disconnect();
             }
             else {
                 std::cout << "Invalid command. Please try again." << std::endl;
@@ -80,7 +83,6 @@ void interface::un_menu() {
 
 void interface::cd_menu() {
     std::cout << "=============================================" << std::endl;
-    std::cout << "             Connected to FTP Server"          << std::endl;
     std::cout                                                    << std::endl;
     std::cout << "             1. Change Directory"              << std::endl;
     std::cout << "             2. List Files"                    << std::endl;
@@ -89,7 +91,7 @@ void interface::cd_menu() {
     std::cout << "             5. Upload File"                   << std::endl;
     std::cout << "             6. Download File"                 << std::endl;
     std::cout << "             7. Delete File"                   << std::endl;
-    std::cout << "             8. Stop Managing Files"           << std::endl;
+    std::cout << "             8. Close Data Channel"            << std::endl;
     std::cout << "             9. Disconnect"                    << std::endl;
     std::cout                                                    << std::endl;
     print_connection_info();
@@ -102,19 +104,76 @@ void interface::print_connection_info() {
                   << p_client->cntl_socket->port << std::endl;
     } else {
         std::cout << "No control connection established." << std::endl;
+        return;
+    }
+    if (p_client->data_connected) {
+        std::cout << "Data Connection: " << p_client->data_socket->ip << ":"
+                  << p_client->data_socket->port << std::endl;
+    } else {
+        std::cout << "No data connection established." << std::endl;
     }
 }
 
-void interface::change_dir(const std::string& dir_path) {
-
+void interface::change_dir() {
+    std::string dir_path, resp;
+    std::cout << "Enter directory path: ";
+    std::getline(std::cin, dir_path);
+    if (dir_path.empty()) {
+        std::cerr << "Directory path cannot be empty." << std::endl;
+        return;
+    }
+    send_message("cd " + dir_path);
+    recv_message(resp);
+    if (resp.empty()) {
+        std::cerr << "Failed to get response." << std::endl;
+        return;
+    }
+    std::cout << resp;
 }
 
 void interface::list_files() {
-
+    std::string resp = "ls";
+    send_message(resp);
+    recv_message(resp);
+    if (resp.empty()) {
+        std::cerr << "Failed to get response." << std::endl;
+        return;
+    }
+    std::cout << resp;
 }
 
-void interface::create_dir(const std::string& dir_name) {
+void interface::create_dir() {
+    std::string dir_name, resp;
+    std::cout << "Enter new directory name: ";
+    std::getline(std::cin, dir_name);
+    if (dir_name.empty()) {
+        std::cerr << "Directory name cannot be empty." << std::endl;
+        return;
+    }
+    send_message("mkdir " + dir_name);
+    recv_message(resp);
+    if (resp.empty()) {
+        std::cerr << "Failed to get response." << std::endl;
+        return;
+    }
+    std::cout << resp;
+}
 
+void interface::remove_dir() {
+    std::string dir_to_del, resp;
+    std::cout << "Enter the directory name to delete: ";
+    std::getline(std::cin, dir_to_del);
+    if (dir_to_del.empty()) {
+        std::cerr << "Directory name cannot be empty." << std::endl;
+        return;
+    }
+    send_message("rmdir " + dir_to_del);
+    recv_message(resp);
+    if (resp.empty()) {
+        std::cerr << "Failed to get response." << std::endl;
+        return;
+    }
+    std::cout << resp;
 }
 
 void interface::send_request() {
@@ -127,47 +186,12 @@ void interface::send_request() {
         return;
     }
     // 发送 PASV 命令
-    sprintf(p_client->cntl_socket->buf, "PASV");
-    int len = p_client->cntl_socket->buflen = strlen(p_client->cntl_socket->buf);
-    int al = 0, n;
-    do {
-        n = p_client->cntl_socket->write_size(&len);
-        if (n < 0) {
-            std::cerr << "Failed to write size to control socket." << std::endl;
-            return;
-        }
-    } while (n == 0);
-    do {
-        n = p_client->cntl_socket->swrite(len, al);
-        if (n < 0) {
-            std::cerr << "Failed to send PASV command." << std::endl;
-            return;
-        }
-    } while (len || n == 0);
+    std::string msg = "PASV", resp;
+    send_message(msg);
     // 读取 PASV 响应
-    do {
-        n = p_client->cntl_socket->read_size(&len);
-        if (n < 0) {
-            std::cerr << "Failed to read response size from server." << std::endl;
-            return;
-        }
-    } while (n == 0);
-    p_client->cntl_socket->buflen = len;
-    al = 0;
-    if (len <= 0) {
-        std::cerr << "Failed to read response from server." << std::endl;
-        return;
-    }
-    do {
-        n = p_client->cntl_socket->sread(len, al);
-        if (n < 0) {
-            std::cerr << "Failed to read PASV response." << std::endl;
-            return;
-        }
-    } while (len || n == 0);
-    std::cout << "PASV response: " << p_client->cntl_socket->buf << std::endl;
+    recv_message(resp);
+    std::cout << "PASV response: " << msg << std::endl;
     uint16_t port, p1, p2;
-    std::string resp = p_client->cntl_socket->buf;
     std::regex regex("227 Entering Passive Mode \\((\\d+),(\\d+),(\\d+),(\\d+),(\\d+),(\\d+)\\)");
     std::smatch match;
     if (std::regex_search(resp, match, regex) && match.size() == 7) {
@@ -195,9 +219,10 @@ void interface::send_request() {
     printf("227 Entering Passive Mode (%s:%d)\n",
            p_client->data_socket->ip.c_str(), p_client->data_socket->port);
            // 这后面改成那个形式
+    p_client->data_connected = true;
 }
 
-void interface::upload_file(const std::string& file_path) {
+void interface::upload_file() {
     if (!p_client->data_connected) {
         std::cerr << "Data channel not created." << std::endl;
         return;
@@ -205,7 +230,7 @@ void interface::upload_file(const std::string& file_path) {
     // Implement file upload logic here
 }
 
-void interface::download_file(const std::string& file_path) {
+void interface::download_file() {
     if (!p_client->data_connected) {
         std::cerr << "Data channel not created." << std::endl;
         return;
@@ -213,12 +238,100 @@ void interface::download_file(const std::string& file_path) {
     // Implement file download logic here
 }
 
-void interface::delete_file(const std::string& file_path) {
+void interface::delete_file() {
     if (!p_client->data_connected) {
         std::cerr << "Data channel not created." << std::endl;
         return;
     }
-    // Implement file deletion logic here
+    std::string file_to_del, resp;
+    std::cout << "Enter the file name to delete: ";
+    std::getline(std::cin, file_to_del);
+    if (file_to_del.empty()) {
+        std::cerr << "File name cannot be empty." << std::endl;
+        return;
+    }
+    send_message("remove" + file_to_del);
+    recv_message(resp);
+    if (resp.empty()) {
+        std::cerr << "Failed to get response." << std::endl;
+        return;
+    }
+    std::cout << resp;
+}
+
+void interface::close_data_channel() {
+    // 检测数据通道存在性
+    if (!p_client->data_connected) {
+        std::cerr << "No data channel to close." << std::endl;
+        return;
+    }
+    // 通知服务器关闭数据通道
+    std::string msg = "close";
+    send_message(msg);
+    // 本地关闭数据通道
+    p_client->data_disconnect();
+    std::cout << "Data channel closed." << std::endl;
+}
+
+void interface::disconnect() {
+    // 检测控制连接存在性
+    if (!p_client->cntl_connected) {
+        std::cerr << "No control connection to disconnect." << std::endl;
+        return;
+    }
+    // 发送断开连接命令
+    std::string msg = "dic";
+    send_message(msg);
+    // 本地断开控制连接
+    p_client->cntl_disconnect();
+    std::cout << "Disconnected from server." << std::endl;
+    running = false; // 退出主循环
+}
+
+void interface::send_message(const std::string& msg) {
+    strcpy(p_client->cntl_socket->buf, msg.c_str());
+    int len = p_client->cntl_socket->buflen = strlen(p_client->cntl_socket->buf);
+    int al = 0, n;
+    do {
+        n = p_client->cntl_socket->write_size(&len);
+        if (n < 0) {
+            std::cerr << "Failed to write size to control socket." << std::endl;
+            return;
+        }
+    } while (n == 0);
+    do {
+        n = p_client->cntl_socket->swrite(len, al);
+        if (n < 0) {
+            std::cerr << "Failed to send PASV command." << std::endl;
+            return;
+        }
+    } while (len || n == 0);
+}
+
+void interface::recv_message(std::string& msg) {
+    int len, n, al = 0;
+    do {
+        n = p_client->cntl_socket->read_size(&len);
+        if (n < 0) {
+            std::cerr << "Failed to read response size from server." << std::endl;
+            return;
+        }
+    } while (n == 0);
+    p_client->cntl_socket->buflen = len;
+    al = 0;
+    if (len <= 0) {
+        std::cerr << "Failed to read response from server." << std::endl;
+        return;
+    }
+    do {
+        n = p_client->cntl_socket->sread(len, al);
+        if (n < 0) {
+            std::cerr << "Failed to read PASV response." << std::endl;
+            return;
+        }
+    } while (len || n == 0);
+    p_client->cntl_socket->buf[p_client->cntl_socket->buflen] = '\0';
+    msg.assign(p_client->cntl_socket->buf, p_client->cntl_socket->buflen);
 }
 
 /* ---------- socket ---------- */
@@ -318,7 +431,8 @@ int Socket::swrite(int& leftsize, int& alreadywrite) {
 ftp_client::ftp_client() {
     pool = new thread_pool(4, 8);
     pool->init();
-    fm = new file_manager();
+    std::string home_dir = std::string(getenv("HOME"));
+    fm = new file_manager(home_dir);
     ui = new interface(this);
 }
 

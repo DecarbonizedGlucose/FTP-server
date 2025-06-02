@@ -1,6 +1,7 @@
 #include "../include/serveract.hpp"
 
-int main() {
+int main(int argc, char *argv[]) {
+    init_root_dir(argv[1]);
     reactor rea("", 2100, AF_INET, BUFSIZ, 50, 128, 2000);
     auto pool = new thread_pool(8);
     pool->init();

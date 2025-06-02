@@ -3,6 +3,7 @@
 #include <utility>
 #include <any>
 #include <algorithm>
+#include <fstream>
 
 /*
  * reactor中event的flags标记：
@@ -14,7 +15,46 @@
  * 2 -> 1-3
 */
 
-// for root listener event, flags = 0
+namespace file {
+    std::string root_dir;
+}
+
+void init_root_dir(const char* str) {
+    std::ifstream fs;
+    fs.open(str);
+    if (!fs.is_open()) {
+        std::cerr << "Failed to open root directory file" << std::endl;
+        throw std::runtime_error("Failed to open root directory file");
+    }
+    std::string dir, all;
+    all.assign((std::istreambuf_iterator<char>(fs)), std::istreambuf_iterator<char>());
+    if (all.empty()) {
+        std::cerr << "Root directory is empty" << std::endl;
+        throw std::runtime_error("Root directory is empty");
+    }
+    auto pos1 = all.find("ServerRootDirectory=");
+    if (pos1 == std::string::npos)  {
+        std::cerr << "Invalid root directory format" << std::endl;
+        throw std::runtime_error("Invalid root directory format");
+    }
+    auto pos2 = all.find('\n', pos1);
+    if (pos2 != std::string::npos) {
+        dir = all.substr(pos1 + 20, pos2);
+    }
+    else {
+        dir = all.substr(pos1 + 20);
+    }
+    while (dir.back() == ' ') {
+        dir.pop_back();
+    }
+    if (dir.back() != '/') {
+        dir += '/';
+    }
+    file::root_dir = dir;
+    std::cout << "Root directory initialized: " << file::root_dir << std::endl;
+    fs.close();
+}
+
 void root_connection(event* ev) {
     struct sockaddr_in client_addr = {0};
     int i;
@@ -34,13 +74,14 @@ void root_connection(event* ev) {
             std::cerr << "Failed to set non-blocking mode: " << strerror(errno) << std::endl;
             break;
         }
-        pe = new event(cfd, EPOLLIN | EPOLLET, ev->p_rea->event_buf_size);
+        pe = new event(cfd, EPOLLIN | EPOLLET | EPOLLONESHOT, ev->p_rea->event_buf_size);
         if (!pe) {
             std::cerr << "Failed to create event for new connection" << std::endl;
             break;
         }
         pe->flags = 1;
         pe->data = new std::pair<event*, event*>(nullptr, nullptr);
+        pe->cntler = new file_manager(file::root_dir);
         pe->set(std::bind(command_analyser, pe));
         if (!ev->p_rea->add_event(pe)) {
             std::cerr << "Failed to add event to reactor" << std::endl;
@@ -55,18 +96,6 @@ void root_connection(event* ev) {
     throw std::runtime_error("Failed to accept connection - " + std::string(strerror(errno)));
 }
 
-/* for command analyser event, flags = 1
- * commands:
- * 1. PASV: 创建数据传输通道
- * 2. STOR <file>: 客户端上传文件(服务端下载)
- * 3. RETR <file>: 客户端下载文件(服务端上传)
- * 4. ls: 列出当前目录下的文件
- * 5. cd <dir>: 切换目录
- * 6. mkdir <dir>: 创建目录
- * 7. rmdir <dir>: 删除目录
- * 8. rm <file>: 删除文件
- * 9. dic: 断开通道
-*/
 void command_analyser(event* ev) {
     if (!ev || !ev->p_rea) {
         std::cerr << "Invalid event or reactor pointer" << std::endl;
@@ -74,37 +103,18 @@ void command_analyser(event* ev) {
     }
     // 如果这里循环读取更加严格
     std::cout << "Command analyser started for event: " << ev->fd << std::endl;
-    int datasize = 0;
-    int ret;
-    do {
-        ret = read_size_from(ev, &datasize);
-    } while (ret == 0);
-    if (ret <= 0) {
-        std::cerr << "Failed to read data size from event" << std::endl;
-        return;
-    }
-    if (datasize <= 0 || datasize > ev->buffer_size) {
-        std::cerr << "Invalid data size: " << datasize << std::endl;
-        return;
-    }
-    do {
-        ret = read_from(ev);
-    } while (ret == 0);
-    if (ret <= 0) {
-        std::cerr << "Failed to read data from event" << std::endl;
-        return;
-    }
-    std::string command = ev->buf;
+    std::string command;
+    ev->recv_message(command);
     std::cout << "Received command: " << command << std::endl;
     // 执行各种本地命令,设置next_event的值
     if (command == "PASV") { // 创建数据传输通道
         new_data_channel_listen(ev);
     }
     else if (command.substr(0, 4) == "STOR") { // 服务端下载
-        //next_event = EPOLLIN | EPOLLET;
+        download(ev, command.substr(5));
     }
     else if (command.substr(0, 4) == "RETR") { // 服务端上传
-        //next_event = EPOLLOUT | EPOLLET;
+        upload(ev, command.substr(5));
     }
     else if (command == "ls") { // 列出当前目录下的文件
         list_dir(ev);
@@ -113,15 +123,18 @@ void command_analyser(event* ev) {
         change_dir(ev, command.substr(3));
     }
     else if (command.substr(0, 5) == "mkdir") { // 创建目录
-        create_dir(ev, command);
+        create_dir(ev, command.substr(6));
     }
     else if (command.substr(0, 5) == "rmdir") { // 删除目录
-        remove_dir(ev, command);
+        remove_dir(ev, command.substr(6));
     }
     else if (command.substr(0, 2) == "rm") { // 删除文件
-        remove_file(ev, command);
+        remove_file(ev, command.substr(3));
     }
-    else if (command == "dic") { // 断开通道
+    else if (command == "close") { // 关闭数据通道
+        close_channel(ev);
+    }
+    else if (command == "dic") { // 断开连接
         disconnect(ev);
     }
     else {
@@ -130,9 +143,6 @@ void command_analyser(event* ev) {
     }
 }
 
-// for command analyser event, flags = 1
-// command = "PASV"
-// next step: notify_client
 void new_data_channel_listen(event* ev) {
     struct sockaddr_in serv_addr = {0};
     serv_addr.sin_family = AF_INET;
@@ -154,7 +164,7 @@ void new_data_channel_listen(event* ev) {
             std::cerr << "Failed to listen on socket: " << strerror(errno) << std::endl;
             break;
         }
-        ll_event = new event(llfd, EPOLLIN | EPOLLET, ev->p_rea->event_buf_size);
+        ll_event = new event(llfd, EPOLLIN | EPOLLET | EPOLLONESHOT, ev->p_rea->event_buf_size);
         if (!ll_event) {
             std::cerr << "Failed to create event for listening socket" << std::endl;
             break;
@@ -162,7 +172,7 @@ void new_data_channel_listen(event* ev) {
         ll_event->flags = 2; // 二级监听事件
         ll_event->data = new std::pair<event*, event*>(ev, nullptr);
         auto ll_func = std::bind(create_data_channel, ll_event);
-        ll_event->set(EPOLLIN | EPOLLET, ll_func);
+        ll_event->set(EPOLLIN | EPOLLET | EPOLLONESHOT, ll_func);
         if (!ev->p_rea->add_event(ll_event)) {
             std::cerr << "Failed to add event to reactor" << std::endl;
             break;
@@ -170,7 +180,7 @@ void new_data_channel_listen(event* ev) {
         ev->remove_from_tree();
         auto func = std::bind(notify_client, ev);
         std::any_cast<std::pair<event*, event*>*>(ev->data)->first = ll_event;
-        ev->set(EPOLLOUT | EPOLLET, func);
+        ev->set(EPOLLOUT | EPOLLET | EPOLLONESHOT, func);
         ev->add_to_tree();
         return;
     } while (0);
@@ -181,7 +191,6 @@ void new_data_channel_listen(event* ev) {
     }
 }
 
-// for command analyser event, flags = 1
 void notify_client(event* ev) {
     if (!ev || !ev->p_rea) {
         std::cerr << "Invalid event or reactor pointer" << std::endl;
@@ -222,12 +231,11 @@ void notify_client(event* ev) {
         datasize -= ret;
     } while (datasize > 0 || ret == 0);
     ev->remove_from_tree();
-    ev->set(EPOLLIN | EPOLLET, std::bind(command_analyser, ev));
+    ev->set(EPOLLIN | EPOLLET | EPOLLONESHOT, std::bind(command_analyser, ev));
     ev->add_to_tree();
     std::cout << "Client notified about data channel creation" << std::endl;
 }
 
-// for sub listener event, flags = 2
 void create_data_channel(event* ev) {
     int new_cfd = -1;
     struct sockaddr_in clnt_addr = {0};
@@ -248,13 +256,13 @@ void create_data_channel(event* ev) {
             std::cerr << "Failed to set non-blocking mode: " << strerror(errno) << std::endl;
             break;
         }
-        nc_event = new event(new_cfd, EPOLLIN | EPOLLET, ev->p_rea->event_buf_size);
+        nc_event = new event(new_cfd, EPOLLIN | EPOLLET | EPOLLONESHOT, ev->p_rea->event_buf_size);
         if (!nc_event) {
             std::cerr << "Failed to create event for new connection" << std::endl;
             break;
         }
         nc_event->flags = 3; // 文件传输读/写事件
-        nc_event->set(EPOLLIN | EPOLLET);
+        nc_event->set(EPOLLIN | EPOLLET | EPOLLONESHOT);
         // 不对nc_event设置回调函数，因为它会在文件传输时被手动调用
         if (ev->p_rea->add_event(nc_event) == false) {
             break;
@@ -272,26 +280,133 @@ void create_data_channel(event* ev) {
     }
 }
 
-// for file transfer event, flags = 3
-void download(event* ev) {}
+//
+void download(event* ev, std::string arg) {}
 
-// for file transfer event, flags = 3
-void upload(event* ev) {}
+//
+void upload(event* ev, std::string arg) {}
 
-// for command analyser event, flags = 1
-void list_dir(event* ev) {}
+void list_dir(event* ev) {
+    std::string resp;
+    auto fm = std::any_cast<file_manager*>(ev->cntler);
+    if (!fm) {
+        std::cerr << "File manager is not initialized" << std::endl;
+        return;
+    }
+    fm->ls(resp);
+    ev->remove_from_tree();
+    ev->set(EPOLLOUT | EPOLLET | EPOLLONESHOT, std::bind(send_resp, ev, resp));
+    ev->add_to_tree();
+}
 
-// for command analyser event, flags = 1
-void change_dir(event* ev, std::string arg) {}
+void change_dir(event* ev, std::string arg) {
+    std::string resp;
+    auto fm = std::any_cast<file_manager*>(ev->cntler);
+    if (!fm) {
+        std::cerr << "File manager is not initialized" << std::endl;
+        return;
+    }
+    fm->cd(arg, resp);
+    ev->remove_from_tree();
+    ev->set(EPOLLOUT | EPOLLET | EPOLLONESHOT, std::bind(send_resp, ev, resp));
+    ev->add_to_tree();
+}
 
-// for command analyser event, flags = 1
-void create_dir(event* ev, std::string arg) {}
+void create_dir(event* ev, std::string arg) {
+    std::string resp;
+    auto fm = std::any_cast<file_manager*>(ev->cntler);
+    if (!fm) {
+        std::cerr << "File manager is not initialized" << std::endl;
+        return;
+    }
+    fm->mkdir(arg, resp);
+    ev->remove_from_tree();
+    ev->set(EPOLLOUT | EPOLLET | EPOLLONESHOT, std::bind(send_resp, ev, resp));
+    ev->add_to_tree();
+}
 
-// for command analyser event, flags = 1
-void remove_dir(event* ev, std::string arg) {}
+void remove_dir(event* ev, std::string arg) {
+    std::string resp;
+    auto fm = std::any_cast<file_manager*>(ev->cntler);
+    if (!fm) {
+        std::cerr << "File manager is not initialized" << std::endl;
+        return;
+    }
+    fm->rmdir(arg, resp);
+    ev->remove_from_tree();
+    ev->set(EPOLLOUT | EPOLLET | EPOLLONESHOT, std::bind(send_resp, ev, resp));
+    ev->add_to_tree();
+}
 
-// for command analyser event, flags = 1
-void remove_file(event* ev, std::string arg) {}
+void remove_file(event* ev, std::string arg) {
+    std::string resp;
+    auto fm = std::any_cast<file_manager*>(ev->cntler);
+    if (!fm) {
+        std::cerr << "File manager is not initialized" << std::endl;
+        return;
+    }
+    fm->rm(arg, resp);
+    ev->remove_from_tree();
+    ev->set(EPOLLOUT | EPOLLET | EPOLLONESHOT, std::bind(send_resp, ev, resp));
+    ev->add_to_tree();
+}
 
-// for command analyser event, flags = 1
-void disconnect(event*ev) {}
+void close_channel(event* ev) {
+    if (!ev || !ev->p_rea) {
+        std::cerr << "Invalid event or reactor pointer" << std::endl;
+        return;
+    }
+    // 关闭数据通道
+    auto pp = std::any_cast<std::pair<event*, event*>*>(ev->data);
+    auto ll_event = pp->first;
+    auto data_event = pp->second;
+    pp->first = pp->second = nullptr;
+    delete std::any_cast<file_manager*>(ev->cntler); // 清理cntler
+    ev->cntler = nullptr;
+    ll_event->remove_from_tree();
+    data_event->remove_from_tree();
+    if (!ev->p_rea->remove_event(ll_event)) {
+        std::cerr << "Failed to remove listening event from reactor" << std::endl;
+    }
+    if (!ev->p_rea->remove_event(data_event)) {
+        std::cerr << "Failed to remove data event from reactor" << std::endl;
+    }
+    delete ll_event;
+    delete data_event;
+    ll_event = data_event = nullptr;
+}
+
+void disconnect(event* ev) {
+    if (!ev || !ev->p_rea) {
+        std::cerr << "Invalid event or reactor pointer" << std::endl;
+        return;
+    }
+    auto pp = std::any_cast<std::pair<event*, event*>*>(ev->data);
+    if (pp->first || pp->second) {
+        close_channel(ev); // 先关闭数据通道
+    }
+    auto fm = std::any_cast<file_manager*>(ev->cntler);
+    if (fm) {
+        delete fm; // 清理文件管理器
+        ev->cntler = nullptr;
+    }
+    ev->remove_from_tree();
+    if (!ev->p_rea->remove_event(ev)) {
+        std::cerr << "Failed to remove event from reactor" << std::endl;
+    }
+    delete ev; // 删除事件
+    ev = nullptr;
+    std::cout << "Client disconnected" << std::endl;
+}
+
+void send_resp(event* ev, const std::string& resp) {
+    if (!ev || !ev->p_rea) {
+        std::cerr << "Invalid event or reactor pointer" << std::endl;
+        return;
+    }
+    ev->send_message(resp);
+    ev->remove_from_tree();
+    ev->set(EPOLLIN | EPOLLET | EPOLLONESHOT, std::bind(command_analyser, ev));
+    ev->add_to_tree();
+    std::cout << "Response sent to client: " << resp << std::endl;
+}

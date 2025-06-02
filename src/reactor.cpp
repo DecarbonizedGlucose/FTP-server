@@ -1,4 +1,5 @@
 #include "../include/reactor.hpp"
+#include "../include/action.hpp"
 
 /* ---------- event ---------- */
 
@@ -27,6 +28,12 @@ event::event(int fd, int events, int buffer_size)
 }
 
 event::~event() {
+    // 在进行这些之前要把data和cntler的内容清空
+    // 手动清理资源
+    if (data.has_value() || cntler.has_value()) {
+        data.reset();
+        cntler.reset();
+    }
     if (fd > 0) {
         close(fd);
         fd = -1;
@@ -100,8 +107,6 @@ void event::remove_from_tree() {
 }
 
 void event::add_to_tree() {
-    // actually modify event
-    // if not in reactor, throw error
     if (!in_reactor()) {
         throw std::runtime_error("Event is not associated with a reactor - " + std::string(strerror(errno)));
     }
@@ -184,8 +189,6 @@ void reactor::add_pool(thread_pool* p) {
     this->pool = p;
 }
 
-//void reactor::listen_init() {}
-
 void reactor::listen_init(void (*root_connection)(event*)) {
     struct sockaddr_in serv_addr = {0};
     serv_addr.sin_family = this->family;
@@ -216,7 +219,7 @@ void reactor::listen_init(void (*root_connection)(event*)) {
             std::cerr << "Failed to listen on socket" << std::endl;
             break;
         }
-        event* listen_event = new event(this->listen_fd, EPOLLIN, this->event_buf_size);
+        event* listen_event = new event(this->listen_fd, EPOLLIN | EPOLLET, this->event_buf_size);
         if (!listen_event) {
             std::cerr << "Failed to create listen event" << std::endl;
             break;
@@ -231,8 +234,6 @@ void reactor::listen_init(void (*root_connection)(event*)) {
     close(this->listen_fd);
     throw std::runtime_error("reactor::listen_init: Failed to create listening socket - " + std::string(strerror(errno)));
 }
-
-//void reactor::listen_init(std::function<void(event*)>root_connection) {}
 
 int reactor::wait() {
 again:
@@ -269,9 +270,51 @@ bool reactor::remove_event(event* ev) {
     auto it = this->events.find(ev->fd);
     if (it != this->events.end()) {
         it->second->remove_from_tree();
-        delete it->second;
         this->events.erase(it);
         return true;
     }
     return false;
+}
+
+void event::send_message(const std::string& msg) {
+    strcpy(this->buf, msg.c_str());
+    int datasize = this->buflen = msg.size();
+    int n;
+    do {
+        n = write_size_to(this, &datasize);
+        if (n < 0) {
+            std::cerr << "Failed to write response size to event" << std::endl;
+            return;
+        }
+    } while (n == 0);
+    do {
+        n = write_to(this);
+        if (n < 0) {
+            std::cerr << "Failed to write response to event" << std::endl;
+            return;
+        }
+        datasize -= n;
+    } while (datasize > 0 || n == 0);
+}
+
+void event::recv_message(std::string& msg) {
+    int datasize = 0, n;
+    do {
+        n = read_size_from(this, &datasize);
+        if (n < 0) {
+            std::cerr << "Failed to read data size from event" << std::endl;
+            return;
+        }
+    } while (n == 0);
+    this->buflen = datasize;
+    do {
+        n = read_from(this);
+        if (n < 0) {
+            std::cerr << "Failed to read data from event" << std::endl;
+            return;
+        }
+        datasize -= n;
+    } while (datasize > 0 || n == 0);
+    this->buf[this->buflen] = '\0';
+    msg.assign(this->buf, this->buflen);
 }

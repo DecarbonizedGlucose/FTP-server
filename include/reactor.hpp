@@ -24,9 +24,9 @@
 
 #include "../include/thread_pool.hpp"
 
-namespace net {
-    const int max_open_files = 1024;
-}
+// namespace net {
+//     const int max_open_files = 1024;
+// }
 
 class event;
 class reactor;
@@ -59,9 +59,7 @@ public:
     ~reactor();
 
     void add_pool(thread_pool* p);
-    //void listen_init();
     void listen_init(void (*root_connection)(event*));
-    //void listen_init(std::function<void(event*)>root_connection);
     int wait();
     bool add_event(event* ev);
     bool remove_event(event* ev);
@@ -83,8 +81,9 @@ public:
     std::function<void()> call_back_func = nullptr;
 
     // 为本项目定制的成员
-    int flags = 0; // 用来标记事件的层级
+    int flags = 0; // 用来标记事件的层级(好像除了给人看没啥用)
     std::any data = nullptr; // 你不能什么都往这里塞
+    std::any cntler = nullptr;
 
     event() = delete;
     event(int fd, int events, int buffer_size, std::function<void()> call_back_func);
@@ -104,6 +103,9 @@ public:
     void add_to_tree();
     bool is_buf_full() const;
     void call_back();
+
+    void send_message(const std::string& msg);
+    void recv_message(std::string& msg);
 };
 
 #endif
