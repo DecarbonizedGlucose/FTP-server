@@ -7,9 +7,17 @@
 ~~~sh
 git clone https://github.com/DecarbonizedGlucose/FTP-server.git
 cd FTP-server
-cmake -B build
-cmake --build build
-cd build/bin
-./ftp_server
-./ftp_client
+./build.sh
+# 可执行文件目录：bin/
+~~~
+创建一个配置文件，如config.txt，写入
+~~~
+ServerRootDirectory={存储路径根目录,绝对路径}
+~~~
+运行时，
+~~~sh
+# 客户端
+bin/FTP-client
+# 服务端
+bin/FTP-server {配置文件,绝对路径}
 ~~~

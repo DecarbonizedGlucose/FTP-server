@@ -87,12 +87,13 @@ void interface::cd_menu() {
     std::cout << "             1. Change Directory"              << std::endl;
     std::cout << "             2. List Files"                    << std::endl;
     std::cout << "             3. Create Directory"              << std::endl;
-    std::cout << "             4. Send PASV Command"             << std::endl;
-    std::cout << "             5. Upload File"                   << std::endl;
-    std::cout << "             6. Download File"                 << std::endl;
-    std::cout << "             7. Delete File"                   << std::endl;
-    std::cout << "             8. Close Data Channel"            << std::endl;
-    std::cout << "             9. Disconnect"                    << std::endl;
+    std::cout << "             4. Remove Directory"              << std::endl;
+    std::cout << "             5. Send PASV Command"             << std::endl;
+    std::cout << "             6. Upload File"                   << std::endl;
+    std::cout << "             7. Download File"                 << std::endl;
+    std::cout << "             8. Delete File"                   << std::endl;
+    std::cout << "             9. Close Data Channel"            << std::endl;
+    std::cout << "             0. Disconnect"                    << std::endl;
     std::cout                                                    << std::endl;
     print_connection_info();
     std::cout << "=============================================" << std::endl;
@@ -250,7 +251,7 @@ void interface::delete_file() {
         std::cerr << "File name cannot be empty." << std::endl;
         return;
     }
-    send_message("remove" + file_to_del);
+    send_message("remove " + file_to_del);
     recv_message(resp);
     if (resp.empty()) {
         std::cerr << "Failed to get response." << std::endl;
