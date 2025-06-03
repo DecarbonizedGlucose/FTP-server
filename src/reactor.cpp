@@ -3,7 +3,7 @@
 
 /* ---------- event ---------- */
 
-event::event(int fd, int events, int buffer_size, std::function<void()> call_back_func)
+event::event(int fd, int events, size_t buffer_size, std::function<void()> call_back_func)
     : p_rea(nullptr), fd(fd), events(events), buffer_size(buffer_size) {
     if (fd < 0 || buffer_size <= 0) {
         throw std::invalid_argument("Invalid file descriptor or buffer size - " + std::string(strerror(errno)));
@@ -15,7 +15,7 @@ event::event(int fd, int events, int buffer_size, std::function<void()> call_bac
     buf[buffer_size] = '\0';
 }
 
-event::event(int fd, int events, int buffer_size)
+event::event(int fd, int events, size_t buffer_size)
     : p_rea(nullptr), fd(fd), events(events) {
     if (fd < 0 || buffer_size <= 0) {
         throw std::invalid_argument("Invalid file descriptor or buffer size - " + std::string(strerror(errno)));
@@ -100,6 +100,9 @@ void event::remove_from_tree() {
     if (!in_reactor()) {
         throw std::runtime_error("Event is not in a reactor");
     }
+    if (!on_tree) {
+        return;
+    }
     if (epoll_ctl(this->p_rea->epoll_fd, EPOLL_CTL_DEL, this->fd, nullptr) < 0) {
         throw std::runtime_error("Failed to remove event from epoll");
     }
@@ -153,7 +156,7 @@ reactor::reactor() {
 
 reactor::reactor(
     std::string ip, uint16_t port, sa_family_t fam,
-    int buf_size, int max_events,
+    size_t buf_size, int max_events,
     int max_clients, int epoll_timeout
 )   : ip(ip), family(fam), port(port),
     event_buf_size(buf_size), max_events(max_events),
@@ -269,7 +272,9 @@ bool reactor::remove_event(event* ev) {
     }
     auto it = this->events.find(ev->fd);
     if (it != this->events.end()) {
-        it->second->remove_from_tree();
+        if (it->second->on_tree) {
+            it->second->remove_from_tree();
+        }
         this->events.erase(it);
         return true;
     }
@@ -278,7 +283,7 @@ bool reactor::remove_event(event* ev) {
 
 void event::send_message(const std::string& msg) {
     strcpy(this->buf, msg.c_str());
-    int datasize = this->buflen = msg.size();
+    size_t datasize = this->buflen = msg.size();
     int n;
     do {
         n = write_size_to(this, &datasize);
@@ -298,7 +303,8 @@ void event::send_message(const std::string& msg) {
 }
 
 void event::recv_message(std::string& msg) {
-    int datasize = 0, n;
+    size_t datasize = 0;
+    ssize_t n;
     do {
         n = read_size_from(this, &datasize);
         if (n < 0) {

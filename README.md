@@ -7,7 +7,7 @@
 ~~~sh
 git clone https://github.com/DecarbonizedGlucose/FTP-server.git
 cd FTP-server
-./build.sh
+zsh ./build.sh
 # 可执行文件目录：bin/
 ~~~
 创建一个配置文件，如config.txt，写入

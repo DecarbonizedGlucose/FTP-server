@@ -51,7 +51,7 @@ public:
 
     reactor();
     reactor(std::string ip, uint16_t port, sa_family_t fam,
-            int buf_size, int max_events, int max_clnts, int timeout);
+            size_t buf_size, int max_events, int max_clnts, int timeout);
     reactor(const reactor&) = delete;
     reactor(reactor&&) = delete;
     reactor& operator=(const reactor&) = delete;
@@ -75,19 +75,19 @@ public:
     int events = 0;
     bool on_tree = false;
     char* buf = nullptr;
-    int buflen = 0;
-    int buffer_size = BUFSIZ;
+    size_t buflen = 0;
+    size_t buffer_size = BUFSIZ;
     time_t last_active;
     std::function<void()> call_back_func = nullptr;
 
     // 为本项目定制的成员
     int flags = 0; // 用来标记事件的层级(好像除了给人看没啥用)
-    std::any data = nullptr; // 你不能什么都往这里塞
-    std::any cntler = nullptr;
+    std::any data; // 你不能什么都往这里塞
+    std::any cntler;
 
     event() = delete;
-    event(int fd, int events, int buffer_size, std::function<void()> call_back_func);
-    event(int fd, int events, int buffer_size);
+    event(int fd, int events, size_t buffer_size, std::function<void()> call_back_func);
+    event(int fd, int events, size_t buffer_size);
     event(const event&) = delete;
     event(event&&) = delete;
     event& operator=(const event&) = delete;

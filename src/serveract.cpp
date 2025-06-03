@@ -80,8 +80,6 @@ void root_connection(event* ev) {
             break;
         }
         pe->flags = 1;
-        pe->data = new std::pair<event*, event*>(nullptr, nullptr);
-        pe->cntler = new file_manager(file::root_dir);
         pe->set(std::bind(command_analyser, pe));
         if (!ev->p_rea->add_event(pe)) {
             std::cerr << "Failed to add event to reactor" << std::endl;
@@ -132,7 +130,7 @@ void command_analyser(event* ev) {
         remove_file(ev, command.substr(3));
     }
     else if (command == "close") { // 关闭数据通道
-        close_channel(ev);
+        close_channel(ev, true);
     }
     else if (command == "dic") { // 断开连接
         disconnect(ev);
@@ -155,6 +153,8 @@ void new_data_channel_listen(event* ev) {
         std::cerr << "Failed to create socket: " << strerror(errno) << std::endl;
         return;
     }
+    ev->data = new std::pair<event*, event*>(nullptr, nullptr);
+    ev->cntler = new file_manager(file::root_dir);
     do {
         if (::bind(llfd, (struct sockaddr*)&serv_addr, sizeof(serv_addr)) < 0) {
             std::cerr << "Failed to bind socket: " << strerror(errno) << std::endl;
@@ -213,8 +213,8 @@ void notify_client(event* ev) {
     std::replace(resp.begin(), resp.end(), '.', ','); // 替换IP地址中的点为逗号
     strcpy(ev->buf, resp.c_str());
     ev->buflen = resp.size();
-    int datasize = resp.size();
-    int ret;
+    size_t datasize = resp.size();
+    ssize_t ret;
     do {
         ret = write_size_to(ev, &datasize);
     } while (ret == 0);
@@ -268,6 +268,8 @@ void create_data_channel(event* ev) {
             break;
         }
         std::any_cast<std::pair<event*, event*>*>(ev->data)->second = nc_event;
+        event* p_event = std::any_cast<std::pair<event*, event*>*>(ev->data)->first;
+        std::any_cast<std::pair<event*, event*>*>(p_event->data)->second = nc_event;
         // 不再次设置回调函数
         return;
     } while (0);
@@ -280,11 +282,47 @@ void create_data_channel(event* ev) {
     }
 }
 
-//
-void download(event* ev, std::string arg) {}
+void download(event* ev, std::string arg) {
+    if (!ev || !ev->p_rea) {
+        std::cerr << "Invalid event or reactor pointer" << std::endl;
+        return;
+    }
+    auto data = std::any_cast<std::pair<event*, event*>*>(ev->data);
+    event* nc_event = data->second;
+    auto fm = std::any_cast<file_manager*>(ev->cntler);
+    if (!fm) {
+        std::cerr << "File manager is not initialized" << std::endl;
+        return;
+    }
+    std::string resp;
+    if (fm->download(arg, nc_event->fd, nc_event->buf,
+                        nc_event->buffer_size,
+                        (size_t*)&nc_event->buflen, resp, 's') < 0) {
+        std::cout << resp;
+    }
+    ev->remove_from_tree();
+    ev->set(EPOLLOUT | EPOLLET | EPOLLONESHOT, std::bind(send_resp, ev, resp));
+    ev->add_to_tree();
+}
 
-//
-void upload(event* ev, std::string arg) {}
+void upload(event* ev, std::string arg) {
+    if (!ev || !ev->p_rea) {
+        std::cerr << "Invalid event or reactor pointer" << std::endl;
+        return;
+    }
+    auto fm = std::any_cast<file_manager*>(ev->cntler);
+    if (!fm) {
+        std::cerr << "File manager is not initialized" << std::endl;
+        return;
+    }
+    std::string resp;
+    if (fm->upload(arg, ev->fd, ev->buf, ev->buffer_size, (size_t*)&ev->buflen, resp, 's') < 0) {
+        std::cout << resp;
+    }
+    ev->remove_from_tree();
+    ev->set(EPOLLOUT | EPOLLET | EPOLLONESHOT, std::bind(send_resp, ev, resp));
+    ev->add_to_tree();
+}
 
 void list_dir(event* ev) {
     std::string resp;
@@ -351,20 +389,21 @@ void remove_file(event* ev, std::string arg) {
     ev->add_to_tree();
 }
 
-void close_channel(event* ev) {
+void close_channel(event* ev, bool flag) {
     if (!ev || !ev->p_rea) {
         std::cerr << "Invalid event or reactor pointer" << std::endl;
         return;
     }
     // 关闭数据通道
     auto pp = std::any_cast<std::pair<event*, event*>*>(ev->data);
-    auto ll_event = pp->first;
-    auto data_event = pp->second;
+    event* ll_event = pp->first;
+    event* data_event = pp->second;
     pp->first = pp->second = nullptr;
-    delete std::any_cast<file_manager*>(ev->cntler); // 清理cntler
-    ev->cntler = nullptr;
-    ll_event->remove_from_tree();
-    data_event->remove_from_tree();
+    ev->cntler.reset();
+    ev->data.reset();
+    pp = std::any_cast<std::pair<event*, event*>*>(ll_event->data);
+    pp->first = pp->second = nullptr;
+    ll_event->data.reset();
     if (!ev->p_rea->remove_event(ll_event)) {
         std::cerr << "Failed to remove listening event from reactor" << std::endl;
     }
@@ -374,6 +413,12 @@ void close_channel(event* ev) {
     delete ll_event;
     delete data_event;
     ll_event = data_event = nullptr;
+    if (flag) {
+        ev->remove_from_tree();
+        ev->set(EPOLLIN | EPOLLET | EPOLLONESHOT, std::bind(command_analyser, ev));
+        ev->add_to_tree();
+    }
+    std::cout << "Data channel closed" << std::endl;
 }
 
 void disconnect(event* ev) {
@@ -381,16 +426,9 @@ void disconnect(event* ev) {
         std::cerr << "Invalid event or reactor pointer" << std::endl;
         return;
     }
-    auto pp = std::any_cast<std::pair<event*, event*>*>(ev->data);
-    if (pp->first || pp->second) {
-        close_channel(ev); // 先关闭数据通道
+    if (ev->data.has_value()) {
+        close_channel(ev, false); // 先关闭数据通道
     }
-    auto fm = std::any_cast<file_manager*>(ev->cntler);
-    if (fm) {
-        delete fm; // 清理文件管理器
-        ev->cntler = nullptr;
-    }
-    ev->remove_from_tree();
     if (!ev->p_rea->remove_event(ev)) {
         std::cerr << "Failed to remove event from reactor" << std::endl;
     }

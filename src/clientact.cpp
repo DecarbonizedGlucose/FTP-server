@@ -46,10 +46,12 @@ void interface::main_loop() {
                 this->send_request();
             }
             else if (command_num == "6") {
-                // Call upload file function here
+                // 上传文件
+                this->upload_file();
             }
             else if (command_num == "7") {
-                // Call download file function here
+                // 下载文件
+                this->download_file();
             }
             else if (command_num == "8") {
                 // 删除文件
@@ -63,10 +65,14 @@ void interface::main_loop() {
                 // 断开连接
                 this->disconnect();
             }
+            else if (command_num == "") {
+                std::cout << "客户端异常退出" << std::endl;
+            }
             else {
                 std::cout << "Invalid command. Please try again." << std::endl;
             }
         }
+        //system("pause");
     }
 }
 
@@ -120,8 +126,7 @@ void interface::change_dir() {
     std::cout << "Enter directory path: ";
     std::getline(std::cin, dir_path);
     if (dir_path.empty()) {
-        std::cerr << "Directory path cannot be empty." << std::endl;
-        return;
+        dir_path = "/";
     }
     send_message("cd " + dir_path);
     recv_message(resp);
@@ -228,7 +233,31 @@ void interface::upload_file() {
         std::cerr << "Data channel not created." << std::endl;
         return;
     }
-    // Implement file upload logic here
+    std::string file, resp;
+    std::cout << "Enter the file to upload: ";
+    std::getline(std::cin, file);
+    if (file.empty()) {
+        std::cerr << "File path cannot be empty." << std::endl;
+        return;
+    }
+    std::string file_name = file.substr(file.find_last_of("/") + 1);
+    if (file_name.empty()) {
+        std::cerr << "Invalid file name." << std::endl;
+        return;
+    }
+    send_message("STOR " + file_name);
+    p_client->fm->upload(
+        file, p_client->data_socket->fd, p_client->data_socket->buf,
+        p_client->data_socket->buffer_size,
+        &p_client->data_socket->buflen, resp, 'c' // 'c' for client upload
+    );
+    std::cout << resp; // from local client
+    recv_message(resp);
+    if (resp.empty()) {
+        std::cerr << "Failed to get response." << std::endl;
+        return;
+    }
+    std::cout << resp; // from server
 }
 
 void interface::download_file() {
@@ -236,14 +265,34 @@ void interface::download_file() {
         std::cerr << "Data channel not created." << std::endl;
         return;
     }
-    // Implement file download logic here
+    std::string file, resp;
+    std::cout << "Enter the file to download: ";
+    std::getline(std::cin, file);
+    if (file.empty()) {
+        std::cerr << "File path cannot be empty." << std::endl;
+        return;
+    }
+    std::string file_name = file.substr(file.find_last_of("/") + 1);
+    if (file_name.empty()) {
+        std::cerr << "Invalid file name." << std::endl;
+        return;
+    }
+    send_message("RETR " + file_name);
+    p_client->fm->download(
+        file, p_client->data_socket->fd, p_client->data_socket->buf,
+        p_client->data_socket->buffer_size,
+        (size_t*)&p_client->data_socket->buflen, resp, 'c' // 'c' for client download
+    );
+    std::cout << resp; // from local client
+    recv_message(resp);
+    if (resp.empty()) {
+        std::cerr << "Failed to get response." << std::endl;
+        return;
+    }
+    std::cout << resp; // from server
 }
 
 void interface::delete_file() {
-    if (!p_client->data_connected) {
-        std::cerr << "Data channel not created." << std::endl;
-        return;
-    }
     std::string file_to_del, resp;
     std::cout << "Enter the file name to delete: ";
     std::getline(std::cin, file_to_del);
@@ -286,13 +335,13 @@ void interface::disconnect() {
     // 本地断开控制连接
     p_client->cntl_disconnect();
     std::cout << "Disconnected from server." << std::endl;
-    running = false; // 退出主循环
 }
 
 void interface::send_message(const std::string& msg) {
     strcpy(p_client->cntl_socket->buf, msg.c_str());
-    int len = p_client->cntl_socket->buflen = strlen(p_client->cntl_socket->buf);
-    int al = 0, n;
+    size_t len = p_client->cntl_socket->buflen = strlen(p_client->cntl_socket->buf);
+    size_t al = 0;
+    ssize_t n;
     do {
         n = p_client->cntl_socket->write_size(&len);
         if (n < 0) {
@@ -310,7 +359,8 @@ void interface::send_message(const std::string& msg) {
 }
 
 void interface::recv_message(std::string& msg) {
-    int len, n, al = 0;
+    size_t len, al = 0;
+    ssize_t n;
     do {
         n = p_client->cntl_socket->read_size(&len);
         if (n < 0) {
@@ -376,15 +426,15 @@ bool Socket::connect() {
     return true;
 }
 
-int Socket::read_size(int* datasize) {
-    int ret;
+ssize_t Socket::read_size(size_t* datasize) {
+    ssize_t ret;
     do {
         ret = read_size_from(fd, datasize);
     } while (ret == 0);
     return ret;
 }
 
-int Socket::write_size(int* datasize) {
+ssize_t Socket::write_size(size_t* datasize) {
     int ret;
     do {
         ret =  write_size_to(fd, datasize);
@@ -392,7 +442,7 @@ int Socket::write_size(int* datasize) {
     return ret;
 }
 
-int Socket::sread(int& leftsize, int& alreadyread) {
+ssize_t Socket::sread(size_t& leftsize, size_t& alreadyread) {
     if (leftsize <= 0 || alreadyread < 0 || alreadyread > buflen) {
         std::cerr << "Invalid parameters for sread." << std::endl;
         return -1;
@@ -410,7 +460,7 @@ int Socket::sread(int& leftsize, int& alreadyread) {
     return n;
 }
 
-int Socket::swrite(int& leftsize, int& alreadywrite) {
+ssize_t Socket::swrite(size_t& leftsize, size_t& alreadywrite) {
     if (leftsize <= 0 || alreadywrite < 0 || alreadywrite >= buflen) {
         std::cerr << "Invalid parameters for swrite." << std::endl;
         return -1;
@@ -476,11 +526,24 @@ void ftp_client::cntl_connect() {
         std::cerr << "Invalid IP address." << std::endl;
         return;
     }
-    cntl_socket = new Socket(socket(AF_INET, SOCK_STREAM, 0), server_ip, 2100);
-    if (!cntl_socket->connect()) {
-        std::cerr << "Failed to connect to server: " << server_ip << ":" << 2100 << std::endl;
-        delete cntl_socket;
-        cntl_socket = nullptr;
+    try {
+        cntl_socket = new Socket(socket(AF_INET, SOCK_STREAM, 0), server_ip, 2100);
+        if (!cntl_socket->connect()) {
+            std::cerr << "Failed to connect to server: " << server_ip << ":" << 2100 << std::endl;
+            delete cntl_socket;
+            cntl_socket = nullptr;
+            return;
+        }
+    }
+    catch (const std::invalid_argument& e) {
+        std::cerr << "Invalid IP Address" << std::endl;
+    }
+    catch (const std::runtime_error& e) {
+        std::cerr << "Runtime error: " << e.what() << std::endl;
+        return;
+    }
+    catch (...) {
+        std::cerr << "An unexpected error occurred while connecting to the server." << std::endl;
         return;
     }
     cntl_connected = true;

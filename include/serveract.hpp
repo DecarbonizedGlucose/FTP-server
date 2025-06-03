@@ -61,7 +61,7 @@ void remove_file(event* ev, std::string arg);
 
 // for event[flag=1]
 // destroy event[flag=2 flag=3]
-void close_channel(event* ev);
+void close_channel(event* ev, bool flag);
 
 // for event[flag=1]
 // destroy ev self (ev[flag=1])

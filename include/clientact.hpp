@@ -50,18 +50,18 @@ public:
     sa_family_t family = AF_INET;
     struct sockaddr_in serv_addr;
     char *buf = nullptr;
-    int buflen = 0;
-    int buffer_size = BUFSIZ;
+    size_t buflen = 0;
+    size_t buffer_size = BUFSIZ;
 
     Socket() = delete;
     Socket(int fd, std::string ip, uint16_t port, sa_family_t family);
     ~Socket();
 
     bool connect();
-    int read_size(int *datasize);
-    int write_size(int* datasize);
-    int sread(int& leftsize, int& alreadyread);
-    int swrite(int& leftsize, int& alreadywrite);
+    ssize_t read_size(size_t *datasize);
+    ssize_t write_size(size_t* datasize);
+    ssize_t sread(size_t& leftsize, size_t& alreadyread);
+    ssize_t swrite(size_t& leftsize, size_t& alreadywrite);
 };
 
 class ftp_client {
