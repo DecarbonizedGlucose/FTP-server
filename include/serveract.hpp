@@ -38,10 +38,10 @@ void notify_client(event* ev);
 // create event[flag=3]
 void create_data_channel(event* ev);
 
-// for event[flag=3]
+// for event[flag=1]
 void download(event* ev, std::string arg);
 
-// for event[flag=3]
+// for event[flag=1]
 void upload(event* ev, std::string arg);
 
 // for event[flag=1]
@@ -70,5 +70,6 @@ void disconnect(event* ev);
 // for event[flag=1]
 // 中途发送响应或者提示
 void send_resp(event* ev, const std::string& resp);
+void send_resp_again(event* ev, const std::string& resp1, const std::string& resp2);
 
 #endif

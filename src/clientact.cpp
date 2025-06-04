@@ -278,10 +278,19 @@ void interface::download_file() {
         return;
     }
     send_message("RETR " + file_name);
+    recv_message(resp);
+    if (resp.empty()) {
+        std::cerr << "Failed to get response." << std::endl;
+        return;
+    }
+    if (resp == "500 File does not exist\n") {
+        std::cerr << "File not found on server." << std::endl;
+        return;
+    }
     p_client->fm->download(
         file, p_client->data_socket->fd, p_client->data_socket->buf,
         p_client->data_socket->buffer_size,
-        (size_t*)&p_client->data_socket->buflen, resp, 'c' // 'c' for client download
+        &p_client->data_socket->buflen, resp, 'c' // 'c' for client download
     );
     std::cout << resp; // from local client
     recv_message(resp);
@@ -300,7 +309,7 @@ void interface::delete_file() {
         std::cerr << "File name cannot be empty." << std::endl;
         return;
     }
-    send_message("remove " + file_to_del);
+    send_message("rm " + file_to_del);
     recv_message(resp);
     if (resp.empty()) {
         std::cerr << "Failed to get response." << std::endl;
@@ -480,7 +489,7 @@ ssize_t Socket::swrite(size_t& leftsize, size_t& alreadywrite) {
 /* ---------- client ---------- */
 
 ftp_client::ftp_client() {
-    pool = new thread_pool(4, 8);
+    pool = new thread_pool(4);
     pool->init();
     std::string home_dir = std::string(getenv("HOME"));
     fm = new file_manager(home_dir);

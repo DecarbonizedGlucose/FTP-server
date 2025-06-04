@@ -57,7 +57,6 @@ void init_root_dir(const char* str) {
 
 void root_connection(event* ev) {
     struct sockaddr_in client_addr = {0};
-    int i;
     socklen_t addr_len = sizeof(client_addr);
     int cfd = accept(ev->fd, (struct sockaddr*)&client_addr, &addr_len);
     event* pe;
@@ -81,6 +80,8 @@ void root_connection(event* ev) {
         }
         pe->flags = 1;
         pe->set(std::bind(command_analyser, pe));
+        pe->data = new std::pair<event*, event*>(nullptr, nullptr);
+        pe->cntler = new file_manager(file::root_dir);
         if (!ev->p_rea->add_event(pe)) {
             std::cerr << "Failed to add event to reactor" << std::endl;
             delete pe; // Clean up if adding fails
@@ -153,8 +154,6 @@ void new_data_channel_listen(event* ev) {
         std::cerr << "Failed to create socket: " << strerror(errno) << std::endl;
         return;
     }
-    ev->data = new std::pair<event*, event*>(nullptr, nullptr);
-    ev->cntler = new file_manager(file::root_dir);
     do {
         if (::bind(llfd, (struct sockaddr*)&serv_addr, sizeof(serv_addr)) < 0) {
             std::cerr << "Failed to bind socket: " << strerror(errno) << std::endl;
@@ -165,7 +164,7 @@ void new_data_channel_listen(event* ev) {
             break;
         }
         ll_event = new event(llfd, EPOLLIN | EPOLLET | EPOLLONESHOT, ev->p_rea->event_buf_size);
-        if (!ll_event) {
+        if (ll_event == nullptr) {
             std::cerr << "Failed to create event for listening socket" << std::endl;
             break;
         }
@@ -263,6 +262,7 @@ void create_data_channel(event* ev) {
         }
         nc_event->flags = 3; // 文件传输读/写事件
         nc_event->set(EPOLLIN | EPOLLET | EPOLLONESHOT);
+        nc_event->data = std::string();
         // 不对nc_event设置回调函数，因为它会在文件传输时被手动调用
         if (ev->p_rea->add_event(nc_event) == false) {
             break;
@@ -297,7 +297,7 @@ void download(event* ev, std::string arg) {
     std::string resp;
     if (fm->download(arg, nc_event->fd, nc_event->buf,
                         nc_event->buffer_size,
-                        (size_t*)&nc_event->buflen, resp, 's') < 0) {
+                        &nc_event->buflen, resp, 's') < 0) {
         std::cout << resp;
     }
     ev->remove_from_tree();
@@ -310,17 +310,38 @@ void upload(event* ev, std::string arg) {
         std::cerr << "Invalid event or reactor pointer" << std::endl;
         return;
     }
+    auto data = std::any_cast<std::pair<event*, event*>*>(ev->data);
+    event* nc_event = data->second;
     auto fm = std::any_cast<file_manager*>(ev->cntler);
     if (!fm) {
         std::cerr << "File manager is not initialized" << std::endl;
         return;
     }
     std::string resp;
-    if (fm->upload(arg, ev->fd, ev->buf, ev->buffer_size, (size_t*)&ev->buflen, resp, 's') < 0) {
-        std::cout << resp;
+    bool exists = fm->file_exists(arg);
+    if (exists) {
+        resp = "200 File exists\n";
+        auto func = [fm, arg, nc_event, ev] () {
+            fm->upload(arg, nc_event->fd, nc_event->buf,
+                                nc_event->buffer_size,
+                                &nc_event->buflen,
+                                std::any_cast<std::string&>(nc_event->data),
+                                's');
+            nc_event->remove_from_tree();
+            nc_event->set(EPOLLIN | EPOLLET | EPOLLONESHOT, nullptr);
+            nc_event->add_to_tree();
+        };
+        nc_event->remove_from_tree();
+        nc_event->set(EPOLLOUT | EPOLLET | EPOLLONESHOT, func);
+        nc_event->add_to_tree();
+    }
+    else {
+        resp = "500 File does not exist\n";
     }
     ev->remove_from_tree();
-    ev->set(EPOLLOUT | EPOLLET | EPOLLONESHOT, std::bind(send_resp, ev, resp));
+    ev->set(EPOLLOUT | EPOLLET | EPOLLONESHOT,
+        std::bind(send_resp_again, ev, resp,
+        std::any_cast<std::string&>(nc_event->data)));
     ev->add_to_tree();
 }
 
@@ -399,8 +420,6 @@ void close_channel(event* ev, bool flag) {
     event* ll_event = pp->first;
     event* data_event = pp->second;
     pp->first = pp->second = nullptr;
-    ev->cntler.reset();
-    ev->data.reset();
     pp = std::any_cast<std::pair<event*, event*>*>(ll_event->data);
     pp->first = pp->second = nullptr;
     ll_event->data.reset();
@@ -426,12 +445,16 @@ void disconnect(event* ev) {
         std::cerr << "Invalid event or reactor pointer" << std::endl;
         return;
     }
-    if (ev->data.has_value()) {
+    event* ll_event = std::any_cast<std::pair<event*, event*>*>(ev->data)->first;
+    if (ll_event) {
         close_channel(ev, false); // 先关闭数据通道
+        ll_event = nullptr;
     }
     if (!ev->p_rea->remove_event(ev)) {
         std::cerr << "Failed to remove event from reactor" << std::endl;
     }
+    ev->data.reset();
+    ev->cntler.reset();
     delete ev; // 删除事件
     ev = nullptr;
     std::cout << "Client disconnected" << std::endl;
@@ -447,4 +470,16 @@ void send_resp(event* ev, const std::string& resp) {
     ev->set(EPOLLIN | EPOLLET | EPOLLONESHOT, std::bind(command_analyser, ev));
     ev->add_to_tree();
     std::cout << "Response sent to client: " << resp << std::endl;
+}
+
+void send_resp_again(event* ev, const std::string& resp1, const std::string& resp2) {
+    if (!ev || !ev->p_rea) {
+        std::cerr << "Invalid event or reactor pointer" << std::endl;
+        return;
+    }
+    ev->send_message(resp1);
+    ev->remove_from_tree();
+    ev->set(EPOLLOUT | EPOLLET | EPOLLONESHOT, std::bind(send_resp, ev, resp2));
+    ev->add_to_tree();
+    std::cout << "Response sent to client: " << resp1 << std::endl;
 }

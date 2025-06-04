@@ -257,8 +257,13 @@ std::string fm::get_dir_display() {
     return "(root)/" + current_dir.substr(root_dir.length());
 }
 
-std::string fm::get_dir_display(const std::string& dir) {
-    return "(root)/" + dir.substr(root_dir.length());
+std::string fm::get_dir_display(const std::string& dir, bool real) {
+    if (real == false) {
+        return "(root)/" + dir.substr(root_dir.length());
+    }
+    else {
+        return dir;
+    }
 }
 
 bool fm::ls(std::string& resp) {
@@ -301,6 +306,10 @@ bool fm::cd(const std::string& dir, std::string& resp) {
         full_path = current_dir + dir; // Relative path
     }
     full_path = get_real_path(full_path);
+    if (full_path.empty()) {
+        resp = "Error: Invalid directory path\n";
+        return false;
+    }
     if (full_path.back() != '/') {
         full_path += '/';
     }
@@ -335,6 +344,10 @@ bool fm::mkdir(const std::string& new_dir, std::string& resp) {
     }
     // 规范化路径
     full_path = get_real_path(full_path, false);
+    if (full_path.empty()) {
+        resp = "Error: Invalid directory path\n";
+        return false;
+    }
     if (full_path.back() != '/') {
         full_path += '/';
     }
@@ -344,15 +357,15 @@ bool fm::mkdir(const std::string& new_dir, std::string& resp) {
     }
     int ret = ::mkdir(full_path.c_str(), 0755);
     if (ret == 0) {
-        resp = "Successfully created directory: " + get_dir_display(full_path) + "\n";
+        resp = "Successfully created directory: " + get_dir_display(full_path, 0) + "\n";
         return true;
     }
     else if (errno == EEXIST) {
-        resp = "Directory " + get_dir_display(full_path) + " already exists.\n";
+        resp = "Directory " + get_dir_display(full_path, 0) + " already exists.\n";
         return false;
     }
     else {
-        resp = "Error: Unable to create directory " + get_dir_display(full_path) + ": " + strerror(errno) + "\n";
+        resp = "Error: Unable to create directory " + get_dir_display(full_path, 0) + ": " + strerror(errno) + "\n";
         std::cerr << resp;
         return false;
     }
@@ -372,7 +385,11 @@ bool fm::rmdir(const std::string& dir_to_del, std::string& resp) {
     }
     // 规范化路径
     full_path = get_real_path(full_path);
-        if (full_path.back() != '/') {
+    if (full_path.empty()) {
+        resp = "Error: Invalid directory path\n";
+        return false;
+    }
+    if (full_path.back() != '/') {
         full_path += '/';
     }
     if (full_path.find(root_dir) == std::string::npos || full_path.find(current_dir) == 0){
@@ -381,19 +398,19 @@ bool fm::rmdir(const std::string& dir_to_del, std::string& resp) {
     }
     int ret = ::rmdir(full_path.c_str());
     if (ret == 0) {
-        resp = "Successfully removed directory: " + get_dir_display(full_path) + "\n";
+        resp = "Successfully removed directory: " + get_dir_display(full_path, 0) + "\n";
         return true;
     }
     else if (errno == ENOENT) {
-        resp = "Directory " + get_dir_display(full_path) + " does not exist.\n";
+        resp = "Directory " + get_dir_display(full_path, 0) + " does not exist.\n";
         return false;
     }
     else if (errno == ENOTEMPTY) {
-        resp = "Directory " + get_dir_display(full_path) + " is not empty.\n";
+        resp = "Directory " + get_dir_display(full_path, 0) + " is not empty.\n";
         return false;
     }
     else {
-        resp = "Error: Unable to remove directory " + get_dir_display(full_path) + ": " + strerror(errno) + "\n";
+        resp = "Error: Unable to remove directory " + get_dir_display(full_path, 0) + ": " + strerror(errno) + "\n";
         std::cerr << resp;
         return false;
     }
@@ -412,30 +429,34 @@ bool fm::rm(const std::string& file_to_del, std::string& resp) {
         full_path = current_dir + file_to_del;
     }
     full_path = get_real_path(full_path);
+    if (full_path.empty()) {
+        resp = "Error: Invalid file path\n";
+        return false;
+    }
     if (full_path.find(root_dir) != 0) {
         resp = "Error: Only sub files removable\n";
         return false;
     }
     int ret = ::unlink(full_path.c_str());
     if (ret == 0) {
-        resp = "Successfully removed file: " + get_dir_display(full_path) + "\n";
+        resp = "Successfully removed file: " + get_dir_display(full_path, 0) + "\n";
         return true;
     }
     else if (errno == ENOENT) {
-        resp = "File " + get_dir_display(full_path) + " does not exist.\n";
+        resp = "File " + get_dir_display(full_path, 0) + " does not exist.\n";
         return false;
     }
     else {
-        resp = "Error: Unable to remove file " + get_dir_display(full_path) + ": " + strerror(errno) + "\n";
+        resp = "Error: Unable to remove file " + get_dir_display(full_path, 0) + ": " + strerror(errno) + "\n";
         std::cerr << resp;
         return false;
     }
 }
 
 ssize_t fm::copy_file(
-    int from_fd, int to_fd, char* buf,
-    size_t buf_size, size_t* buflen, size_t file_size) {
-    if (from_fd < 0 || to_fd < 0 || buf == nullptr || buf_size <= 0 || buflen == nullptr || file_size < -1) {
+    int from_fd, int to_fd, char* buf, size_t buf_size,
+    size_t* buflen, size_t file_size, bool know_size) {
+    if (from_fd < 0 || to_fd < 0 || buf == nullptr || buf_size <= 0 || buflen == nullptr) {
         std::cerr << "Invalid parameters for copy_file" << std::endl;
         return -1;
     }
@@ -443,7 +464,7 @@ ssize_t fm::copy_file(
     // 如果size >= 0, 要先写入size, 是upload操作
     ssize_t n;
     size_t size_;
-    if (file_size == -1) {
+    if (know_size == false) {
         do {
             n = read_size_from(from_fd, &size_);
         } while (n == 0);
@@ -513,45 +534,61 @@ ssize_t fm::upload(
         return -1;
     }
     std::string full_path;
-    if (flag == 's')
+    if (flag == 's') {
         full_path = get_real_path(current_dir + file_to_upload);
-    else
+        resp = "Server: ";
+    }
+    else {
         full_path = get_real_path(file_to_upload);
+        resp = "Client: ";
+    }
     if (full_path.empty()) {
-        resp = "Error: Invalid file path\n";
+        resp += "Error: Invalid file path\n";
         return -1;
     }
     int file_fd = open(full_path.c_str(), O_RDONLY);
     if (file_fd < 0) {
-        resp = "Error: Unable to open file " + full_path + ": " + strerror(errno) + "\n";
+        resp += "Error: Unable to open file " + full_path + ": " + strerror(errno) + "\n";
         return -1;
     }
     // 获取文件大小
     struct stat file_stat;
     if (fstat(file_fd, &file_stat) < 0) {
         close(file_fd);
-        resp = "Error: Unable to get file size for " + full_path + ": " + strerror(errno) + "\n";
+        resp += "Error: Unable to get file size for " + full_path + ": " + strerror(errno) + "\n";
         return -1;
     }
     off_t file_size = file_stat.st_size;
     ssize_t ret = copy_file(
         file_fd, sockfd,
-        buf, buf_size, buflen, file_size);
+        buf, buf_size, buflen, file_size, true);
     close(file_fd);
     if (ret < 0) {
-        if (flag == 'c')
-            resp = "Error: Client: File upload failed\n";
-        else
-            resp = "Error: Server: File download failed\n";
+        resp += "Error: File upload failed\n";
         return -1;
     }
-    if (flag == 'c') {
-        resp = "Client: Successfully uploaded file: " + get_dir_display(full_path) + "\n";
-    } else {
-        resp = "Server: Successfully downloaded file: " + get_dir_display(full_path) + "\n";
-    }
+    resp += "Successfully uploaded file: " + get_dir_display(full_path, flag == 'c') + "\n";
     resp += "File size: " + std::to_string(file_size) + " bytes\n";
     return ret;
+}
+
+bool fm::file_exists(const std::string& file_to_check) {
+    if (file_to_check.empty()) {
+        return false;
+    }
+    std::string full_path;
+    if (file_to_check[0] == '/') {
+        full_path = root_dir + file_to_check.substr(1);
+    }
+    else {
+        full_path = current_dir + file_to_check;
+    }
+    full_path = get_real_path(full_path);
+    if (full_path.empty()) {
+        return false;
+    }
+    struct stat file_stat;
+    return (stat(full_path.c_str(), &file_stat) == 0);
 }
 
 ssize_t fm::download(
@@ -568,42 +605,39 @@ ssize_t fm::download(
         return -1;
     }
     std::string full_path;
-    if (flag == 's')
+    if (flag == 's') {
         full_path = get_real_path(current_dir + file_to_download, false);
-    else
+        resp = "Server: ";
+    }
+    else {
         full_path = get_real_path(file_to_download, false);
-    if (full_path.empty()) {
-        resp = "Error: Invalid file path\n";
+        resp = "Client: ";
+    }
+    if (full_path.empty()) {;
+        resp += "Error: Invalid file path\n";
         return -1;
     }
     // 根据flag判断是客户端还是服务器端
     if (flag == 's') {
         if (full_path.find(root_dir) != 0) {
-            resp = "Error: Only sub dirs able to write\n";
+            resp += "Error: Only sub dirs able to write\n";
             return -1;
         }
     }
-    int file_fd = open(full_path.c_str(), O_RDWR | O_TRUNC);
+    int file_fd = open(full_path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
     if (file_fd < 0) {
-        resp = "Error: Unable to open file " + full_path + ": " + strerror(errno) + "\n";
+        resp += "Error: Unable to open file " + full_path + ": " + strerror(errno) + "\n";
         return -1;
     }
     off_t file_size = copy_file(
         fd, file_fd,
-        buf, bufsize, buflen, -1);
+        buf, bufsize, buflen, 0, false);
     close(file_fd);
     if (file_size < 0) {
-        if (flag == 'c')
-            resp = "Error: Client: File download failed\n";
-        else
-            resp = "Error: Server: File upload failed\n";
+        resp += "Error: File download failed\n";
         return -1;
     }
-    if (flag == 'c') {
-        resp = "Client: Successfully downloaded file: " + get_dir_display(full_path) + "\n";
-    } else {
-        resp = "Server: Successfully uploaded file: " + get_dir_display(full_path) + "\n";
-    }
+    resp += "Successfully downloaded file: " + get_dir_display(full_path, flag == 'c') + "\n";
     resp += "File size: " + std::to_string(file_size) + " bytes\n";
     return file_size;
 }

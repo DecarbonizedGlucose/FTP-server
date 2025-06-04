@@ -36,21 +36,22 @@ private:
     std::string get_real_path(const std::string path, bool ex = true);
 
     ssize_t copy_file(
-        int from_fd, int to_fd, char* buf,
-        size_t buf_size, size_t* buflen, size_t file_size);
+        int from_fd, int to_fd, char* buf, size_t buf_size,
+        size_t* buflen, size_t file_size, bool know_size);
 public:
     file_manager() = delete;
     file_manager(std::string root_dir);
     ~file_manager() = default;
 
     std::string get_dir_display();
-    std::string get_dir_display(const std::string& dir);
+    std::string get_dir_display(const std::string& dir, bool real);
 
     bool ls(std::string& resp);
     bool cd(const std::string& dir, std::string& resp);
     bool mkdir(const std::string& new_dir, std::string& resp);
     bool rmdir(const std::string& dir_to_del, std::string& resp);
     bool rm(const std::string& file_to_del, std::string& resp);
+    bool file_exists(const std::string& file_to_check);
 
     ssize_t upload(
         const std::string& file_to_upload,
