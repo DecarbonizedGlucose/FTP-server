@@ -270,6 +270,8 @@ void create_data_channel(event* ev) {
         if (ev->p_rea->add_event(nc_event) == false) {
             break;
         }
+        // 暂且没有业务
+        nc_event->remove_from_tree();
         std::any_cast<std::pair<event*, event*>*>(ev->data)->second = nc_event;
         event* p_event = std::any_cast<std::pair<event*, event*>*>(ev->data)->first;
         std::any_cast<std::pair<event*, event*>*>(p_event->data)->second = nc_event;
@@ -462,7 +464,7 @@ void send_resp(event* ev, const std::string& resp) {
         return;
     }
     ev->send_message(resp);
-    ev->remove_from_tree(); 
+    ev->remove_from_tree();
     ev->set(EPOLLIN | EPOLLET | EPOLLONESHOT, std::bind(command_analyser, ev));
     ev->add_to_tree();
     std::cout << "Response sent to client: " << resp << std::endl;
@@ -476,11 +478,12 @@ void double_send_resp(event* ev, const std::string& resp1) {
     ev->send_message(resp1);
     ev->remove_from_tree();
     event* nc_event = std::any_cast<std::pair<event*, event*>*>(ev->data)->second;
-    std::string& resp2 = std::any_cast<std::string&>(ev->data);
+    std::string& resp2 = std::any_cast<std::string&>(nc_event->data);
     while (resp2.empty());
     ev->set(EPOLLOUT | EPOLLET | EPOLLONESHOT,
         std::bind(send_resp, ev, resp2));
     ev->add_to_tree();
+    std::cout << "Former response sent to client: " << resp1 << std::endl;
 }
 
 void do_download(event* ev, const std::string& arg) {

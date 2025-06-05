@@ -256,11 +256,15 @@ void interface::upload_file() {
         std::cerr << "Server not ready for upload." << std::endl;
         return;
     }
-    p_client->fm->upload(
+    ssize_t ret = p_client->fm->upload(
         file, p_client->data_socket->fd, p_client->data_socket->buf,
         p_client->data_socket->buffer_size,
         &p_client->data_socket->buflen, resp, 'c' // 'c' for client upload
     );
+    // if (ret < 0) {
+    //     std::cerr << "Failed to upload file." << std::endl;
+    //     //return;
+    // }
     std::cout << resp; // from local client
     recv_message(resp);
     if (resp.empty()) {
