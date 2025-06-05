@@ -136,6 +136,9 @@ void command_analyser(event* ev) {
     else if (command == "dic") { // 断开连接
         disconnect(ev);
     }
+    else if (command.empty()) {
+        std::cout << "Got Empty Command" << std::endl;
+    }
     else {
         std::cerr << "Unknown command: " << command << std::endl;
         return;
@@ -295,13 +298,18 @@ void download(event* ev, std::string arg) {
         return;
     }
     std::string resp;
-    if (fm->download(arg, nc_event->fd, nc_event->buf,
-                        nc_event->buffer_size,
-                        &nc_event->buflen, resp, 's') < 0) {
-        std::cout << resp;
+    bool exists = fm->file_exists(arg);
+    if (!exists) {
+        resp = "Ready to download file";
+        nc_event->set(EPOLLIN | EPOLLET | EPOLLONESHOT,
+            std::bind(do_download, nc_event, arg));
+        nc_event->add_to_tree();
+    }
+    else {
+        resp = "File already exists";
     }
     ev->remove_from_tree();
-    ev->set(EPOLLOUT | EPOLLET | EPOLLONESHOT, std::bind(send_resp, ev, resp));
+    ev->set(EPOLLOUT | EPOLLET | EPOLLONESHOT, std::bind(double_send_resp, ev, resp));
     ev->add_to_tree();
 }
 
@@ -320,28 +328,16 @@ void upload(event* ev, std::string arg) {
     std::string resp;
     bool exists = fm->file_exists(arg);
     if (exists) {
-        resp = "200 File exists\n";
-        auto func = [fm, arg, nc_event, ev] () {
-            fm->upload(arg, nc_event->fd, nc_event->buf,
-                                nc_event->buffer_size,
-                                &nc_event->buflen,
-                                std::any_cast<std::string&>(nc_event->data),
-                                's');
-            nc_event->remove_from_tree();
-            nc_event->set(EPOLLIN | EPOLLET | EPOLLONESHOT, nullptr);
-            nc_event->add_to_tree();
-        };
-        nc_event->remove_from_tree();
-        nc_event->set(EPOLLOUT | EPOLLET | EPOLLONESHOT, func);
+        resp = "Ready to upload file";
+        nc_event->set(EPOLLOUT | EPOLLET | EPOLLONESHOT,
+            std::bind(do_upload, nc_event, arg));
         nc_event->add_to_tree();
     }
     else {
-        resp = "500 File does not exist\n";
+        resp = "File does not exist";
     }
     ev->remove_from_tree();
-    ev->set(EPOLLOUT | EPOLLET | EPOLLONESHOT,
-        std::bind(send_resp_again, ev, resp,
-        std::any_cast<std::string&>(nc_event->data)));
+    ev->set(EPOLLOUT | EPOLLET | EPOLLONESHOT, std::bind(double_send_resp, ev, resp));
     ev->add_to_tree();
 }
 
@@ -466,20 +462,46 @@ void send_resp(event* ev, const std::string& resp) {
         return;
     }
     ev->send_message(resp);
-    ev->remove_from_tree();
+    ev->remove_from_tree(); 
     ev->set(EPOLLIN | EPOLLET | EPOLLONESHOT, std::bind(command_analyser, ev));
     ev->add_to_tree();
     std::cout << "Response sent to client: " << resp << std::endl;
 }
 
-void send_resp_again(event* ev, const std::string& resp1, const std::string& resp2) {
+void double_send_resp(event* ev, const std::string& resp1) {
     if (!ev || !ev->p_rea) {
         std::cerr << "Invalid event or reactor pointer" << std::endl;
         return;
     }
     ev->send_message(resp1);
     ev->remove_from_tree();
-    ev->set(EPOLLOUT | EPOLLET | EPOLLONESHOT, std::bind(send_resp, ev, resp2));
+    event* nc_event = std::any_cast<std::pair<event*, event*>*>(ev->data)->second;
+    std::string& resp2 = std::any_cast<std::string&>(ev->data);
+    while (resp2.empty());
+    ev->set(EPOLLOUT | EPOLLET | EPOLLONESHOT,
+        std::bind(send_resp, ev, resp2));
     ev->add_to_tree();
-    std::cout << "Response sent to client: " << resp1 << std::endl;
 }
+
+void do_download(event* ev, const std::string& arg) {
+    auto data = std::any_cast<std::pair<event*, event*>*>(ev->data);
+    event* p_event = data->first;
+    file_manager* fm = std::any_cast<file_manager*>(p_event->cntler);
+    // 上一步已经验证过, fm可以使用
+    fm->download(arg, ev->fd, ev->buf, ev->buffer_size,
+                 &ev->buflen, std::any_cast<std::string&>(ev->data), 's');
+    // 不使用, 摘下即可
+    ev->remove_from_tree();
+}
+
+void do_upload(event* ev, const std::string& arg) {
+    auto data = std::any_cast<std::pair<event*, event*>*>(ev->data);
+    event* p_event = data->first;
+    file_manager* fm = std::any_cast<file_manager*>(p_event->cntler);
+    // 上一步已经验证过, fm可以使用
+    fm->upload(arg, ev->fd, ev->buf, ev->buffer_size,
+               &ev->buflen, std::any_cast<std::string&>(ev->data), 's');
+    // 不使用, 摘下即可
+    ev->remove_from_tree();
+}
+

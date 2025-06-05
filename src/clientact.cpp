@@ -246,6 +246,16 @@ void interface::upload_file() {
         return;
     }
     send_message("STOR " + file_name);
+    recv_message(resp);
+    if (resp.empty()) {
+        std::cerr << "Failed to get response." << std::endl;
+        return;
+    }
+    std::cout << "Server: " << resp << std::endl;
+    if (resp.find("Ready") == std::string::npos) {
+        std::cerr << "Server not ready for upload." << std::endl;
+        return;
+    }
     p_client->fm->upload(
         file, p_client->data_socket->fd, p_client->data_socket->buf,
         p_client->data_socket->buffer_size,
@@ -283,7 +293,8 @@ void interface::download_file() {
         std::cerr << "Failed to get response." << std::endl;
         return;
     }
-    if (resp == "500 File does not exist\n") {
+    std::cout << "Server: " << resp << std::endl;
+    if (resp.find("Ready") == std::string::npos) {
         std::cerr << "File not found on server." << std::endl;
         return;
     }
