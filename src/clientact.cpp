@@ -240,6 +240,12 @@ void interface::upload_file() {
         std::cerr << "File path cannot be empty." << std::endl;
         return;
     }
+    // 检查文件是否存在
+    file = p_client->fm->get_real_path(file);
+    if (file.empty()) {
+        std::cerr << "File does not exist: " << file << std::endl;
+        return;
+    }
     std::string file_name = file.substr(file.find_last_of("/") + 1);
     if (file_name.empty()) {
         std::cerr << "Invalid file name." << std::endl;
@@ -256,15 +262,19 @@ void interface::upload_file() {
         std::cerr << "Server not ready for upload." << std::endl;
         return;
     }
-    ssize_t ret = p_client->fm->upload(
-        file, p_client->data_socket->fd, p_client->data_socket->buf,
-        p_client->data_socket->buffer_size,
-        &p_client->data_socket->buflen, resp, 'c' // 'c' for client upload
+    p_client->pool->submit(
+        [&]() {
+            p_client->fm->upload(
+                file, p_client->data_socket->fd, p_client->data_socket->buf,
+                p_client->data_socket->buffer_size,
+                &p_client->data_socket->buflen, resp, 'c' // 'c' for client upload
+            );
+        }
     );
-    // if (ret < 0) {
-    //     std::cerr << "Failed to upload file." << std::endl;
-    //     //return;
-    // }
+    while (resp.empty() || resp.back() != '\n') {
+        // 等待上传完成
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
     std::cout << resp; // from local client
     recv_message(resp);
     if (resp.empty()) {
@@ -302,11 +312,19 @@ void interface::download_file() {
         std::cerr << "File not found on server." << std::endl;
         return;
     }
-    p_client->fm->download(
-        file, p_client->data_socket->fd, p_client->data_socket->buf,
-        p_client->data_socket->buffer_size,
-        &p_client->data_socket->buflen, resp, 'c' // 'c' for client download
+    p_client->pool->submit(
+        [&]() {
+            p_client->fm->download(
+                file, p_client->data_socket->fd, p_client->data_socket->buf,
+                p_client->data_socket->buffer_size,
+                &p_client->data_socket->buflen, resp, 'c' // 'c' for client download
+            );
+        }
     );
+    while (resp.empty() || resp.back() != '\n') {
+        // 等待下载完成
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
     std::cout << resp; // from local client
     recv_message(resp);
     if (resp.empty()) {

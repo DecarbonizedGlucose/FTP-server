@@ -30,9 +30,14 @@ public:
         return m_Queue.size();
     }
 
-    void push(T& value) {
+    void push(const T& value) {
         std::unique_lock<std::mutex> lock(m_Mutex);
         m_Queue.push(value);
+    }
+
+    void push(T&& value) {
+        std::unique_lock<std::mutex> lock(m_Mutex);
+        m_Queue.push(std::move(value));
     }
 
     bool pop(T& value) {
@@ -71,20 +76,17 @@ private:
         void operator()() {
             while (pool_ptr->pool_status <= 1) {
                 std::function<void()> func;
-                bool got_task;
                 {
                     std::unique_lock<std::mutex> lock(pool_ptr->m_Mutex);
-                    if (pool_ptr->m_TaskQueue.empty()) {
-                        if (pool_ptr->pool_status == 1) {
-                            return;
-                        }
-                        pool_ptr->m_Condition.wait(lock);
-                    }
-                    got_task = pool_ptr->m_TaskQueue.pop(func);
-                    if (got_task) {
-                        func();
-                    }
+                    pool_ptr->m_Condition.wait(lock, [&]{
+                        return pool_ptr->pool_status == 1 || !pool_ptr->m_TaskQueue.empty();
+                    });
+                    if (pool_ptr->pool_status == 1 && pool_ptr->m_TaskQueue.empty())
+                        return;
+                    if (!pool_ptr->m_TaskQueue.pop(func))
+                        continue;
                 }
+                func();
             }
         }
     };

@@ -75,10 +75,10 @@ void send_resp(event* ev, const std::string& resp);
 // 中途发送两个响应或者提示
 void double_send_resp(event* ev, const std::string& resp1);
 
-// for event flags = 3 
-void do_download(event* ev, const std::string& arg);
+// // for event flags = 3 
+// void do_download(event* ev, const std::string& arg, file_manager* fm);
 
-// for event flags = 3 
-void do_upload(event* ev, const std::string& arg);
+// // for event flags = 3 
+// void do_upload(event* ev, const std::string& arg, file_manager* fm);
 
 #endif

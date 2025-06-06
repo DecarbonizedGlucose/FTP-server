@@ -213,25 +213,7 @@ void notify_client(event* ev) {
                        + ip + "," + std::to_string(port / 256)
                        + "," + std::to_string(port % 256) + ")";
     std::replace(resp.begin(), resp.end(), '.', ','); // 替换IP地址中的点为逗号
-    strcpy(ev->buf, resp.c_str());
-    ev->buflen = resp.size();
-    size_t datasize = resp.size();
-    ssize_t ret;
-    do {
-        ret = write_size_to(ev, &datasize);
-    } while (ret == 0);
-    if (ret < 0) {
-        std::cerr << "Failed to write data size to event" << std::endl;
-        return;
-    }
-    do {
-        ret = write_to(ev);
-        if (ret < 0) {
-            std::cerr << "Failed to write data to client" << std::endl;
-            return;
-        }
-        datasize -= ret;
-    } while (datasize > 0 || ret == 0);
+    send_resp(ev, resp);
     ev->remove_from_tree();
     ev->set(EPOLLIN | EPOLLET | EPOLLONESHOT, std::bind(command_analyser, ev));
     ev->add_to_tree();
@@ -258,20 +240,19 @@ void create_data_channel(event* ev) {
             std::cerr << "Failed to set non-blocking mode: " << strerror(errno) << std::endl;
             break;
         }
-        nc_event = new event(new_cfd, EPOLLIN | EPOLLET | EPOLLONESHOT, ev->p_rea->event_buf_size);
+        nc_event = new event(new_cfd, 0, ev->p_rea->event_buf_size);
         if (!nc_event) {
             std::cerr << "Failed to create event for new connection" << std::endl;
             break;
         }
         nc_event->flags = 3; // 文件传输读/写事件
-        nc_event->set(EPOLLIN | EPOLLET | EPOLLONESHOT);
+        // nc_event->set(EPOLLIN | EPOLLET | EPOLLONESHOT);
         nc_event->data = std::string();
-        // 不对nc_event设置回调函数，因为它会在文件传输时被手动调用
-        if (ev->p_rea->add_event(nc_event) == false) {
-            break;
-        }
-        // 暂且没有业务
-        nc_event->remove_from_tree();
+        // if (ev->p_rea->add_event(nc_event) == false) {
+        //     break;
+        // }
+        // // 暂且没有业务
+        // nc_event->remove_from_tree();
         std::any_cast<std::pair<event*, event*>*>(ev->data)->second = nc_event;
         event* p_event = std::any_cast<std::pair<event*, event*>*>(ev->data)->first;
         std::any_cast<std::pair<event*, event*>*>(p_event->data)->second = nc_event;
@@ -303,9 +284,16 @@ void download(event* ev, std::string arg) {
     bool exists = fm->file_exists(arg);
     if (!exists) {
         resp = "Ready to download file";
-        nc_event->set(EPOLLIN | EPOLLET | EPOLLONESHOT,
-            std::bind(do_download, nc_event, arg));
-        nc_event->add_to_tree();
+        // nc_event->set(EPOLLIN | EPOLLET | EPOLLONESHOT,
+        //     std::bind(do_download, nc_event, arg, fm));
+        // nc_event->add_to_tree();
+        ev->p_rea->pool->submit(
+            [&] {
+                fm->download(arg, nc_event->fd, nc_event->buf,
+                nc_event->buffer_size, &nc_event->buflen,
+                std::any_cast<std::string&>(nc_event->data), 's');
+            }
+        );
     }
     else {
         resp = "File already exists";
@@ -331,9 +319,16 @@ void upload(event* ev, std::string arg) {
     bool exists = fm->file_exists(arg);
     if (exists) {
         resp = "Ready to upload file";
-        nc_event->set(EPOLLOUT | EPOLLET | EPOLLONESHOT,
-            std::bind(do_upload, nc_event, arg));
-        nc_event->add_to_tree();
+        // nc_event->set(EPOLLOUT | EPOLLET | EPOLLONESHOT,
+        //     std::bind(do_upload, nc_event, arg, fm));
+        // nc_event->add_to_tree();
+        ev->p_rea->pool->submit(
+            [&] {
+                fm->upload(arg, nc_event->fd, nc_event->buf,
+                nc_event->buffer_size, &nc_event->buflen,
+                std::any_cast<std::string&>(nc_event->data), 's');
+            }
+        );
     }
     else {
         resp = "File does not exist";
@@ -479,32 +474,28 @@ void double_send_resp(event* ev, const std::string& resp1) {
     ev->remove_from_tree();
     event* nc_event = std::any_cast<std::pair<event*, event*>*>(ev->data)->second;
     std::string& resp2 = std::any_cast<std::string&>(nc_event->data);
-    while (resp2.empty());
+    while (resp2.empty() || resp2.back() == '\n') {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
     ev->set(EPOLLOUT | EPOLLET | EPOLLONESHOT,
         std::bind(send_resp, ev, resp2));
     ev->add_to_tree();
     std::cout << "Former response sent to client: " << resp1 << std::endl;
 }
 
-void do_download(event* ev, const std::string& arg) {
-    auto data = std::any_cast<std::pair<event*, event*>*>(ev->data);
-    event* p_event = data->first;
-    file_manager* fm = std::any_cast<file_manager*>(p_event->cntler);
-    // 上一步已经验证过, fm可以使用
-    fm->download(arg, ev->fd, ev->buf, ev->buffer_size,
-                 &ev->buflen, std::any_cast<std::string&>(ev->data), 's');
-    // 不使用, 摘下即可
-    ev->remove_from_tree();
-}
+// void do_download(event* ev, const std::string& arg, file_manager* fm) {
+//     //throw std::runtime_error("do_download is not implemented yet");
+//     fm->download(arg, ev->fd, ev->buf, ev->buffer_size,
+//                  &ev->buflen, std::any_cast<std::string&>(ev->data), 's');
+//     // 不使用, 摘下即可
+//     ev->remove_from_tree();
+// }
 
-void do_upload(event* ev, const std::string& arg) {
-    auto data = std::any_cast<std::pair<event*, event*>*>(ev->data);
-    event* p_event = data->first;
-    file_manager* fm = std::any_cast<file_manager*>(p_event->cntler);
-    // 上一步已经验证过, fm可以使用
-    fm->upload(arg, ev->fd, ev->buf, ev->buffer_size,
-               &ev->buflen, std::any_cast<std::string&>(ev->data), 's');
-    // 不使用, 摘下即可
-    ev->remove_from_tree();
-}
+// void do_upload(event* ev, const std::string& arg, file_manager* fm) {
+//     //throw std::runtime_error("do_upload is not implemented yet");
+//     fm->upload(arg, ev->fd, ev->buf, ev->buffer_size,
+//                &ev->buflen, std::any_cast<std::string&>(ev->data), 's');
+//     // 不使用, 摘下即可
+//     ev->remove_from_tree();
+// }
 

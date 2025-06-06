@@ -78,18 +78,11 @@ void event::apply_to_reactor(reactor* rea) {
     if (this->on_tree) {
         throw std::runtime_error("Event is already in the reactor tree - " + std::string(strerror(errno)));
     }
-    this->on_tree = true;
     if (!rea) {
         throw std::invalid_argument("Reactor pointer is null - " + std::string(strerror(errno)));
     }
     this->p_rea = rea;
-    struct epoll_event ev = {0, {0}};
-    ev.events = this->events;
-    ev.data.ptr = this;
-    if (epoll_ctl(this->p_rea->epoll_fd, EPOLL_CTL_ADD, this->fd, &ev) < 0) {
-        throw std::runtime_error("event::apply_to_reactor: Failed to add event in epoll - " + std::string(strerror(errno)));
-    }
-    this->last_active = time(nullptr);
+    add_to_tree();
 }
 
 bool event::in_reactor() const {
@@ -116,8 +109,8 @@ void event::add_to_tree() {
     struct epoll_event ev = {0, {0}};
     ev.events = this->events;
     ev.data.ptr = this;
-    if (epoll_ctl(this->p_rea->epoll_fd, EPOLL_CTL_ADD, this->fd, &ev) < 0) {
-        throw std::runtime_error("Failed to modify event in epoll - " + std::string(strerror(errno)));
+    if (epoll_ctl(this->p_rea->epoll_fd, (/*on_tree ? EPOLL_CTL_MOD :*/ EPOLL_CTL_ADD), this->fd, &ev) < 0) {
+        throw std::runtime_error("Failed to add event in epoll - " + std::string(strerror(errno)));
     }
     this->last_active = time(nullptr);
     this->on_tree = true;
