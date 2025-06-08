@@ -421,9 +421,9 @@ void close_channel(event* ev, bool flag) {
     if (!ev->p_rea->remove_event(ll_event)) {
         std::cerr << "Failed to remove listening event from reactor" << std::endl;
     }
-    if (!ev->p_rea->remove_event(data_event)) {
-        std::cerr << "Failed to remove data event from reactor" << std::endl;
-    }
+    // if (!ev->p_rea->remove_event(data_event)) {
+    //     std::cerr << "Failed to remove data event from reactor" << std::endl;
+    // }
     delete ll_event;
     delete data_event;
     ll_event = data_event = nullptr;
