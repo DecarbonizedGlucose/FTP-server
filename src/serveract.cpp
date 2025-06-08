@@ -253,6 +253,8 @@ void create_data_channel(event* ev) {
         // }
         // // 暂且没有业务
         // nc_event->remove_from_tree();
+        // 不加入reactor后，这个event完全是独立的，只由flag=1的event管理
+        // 当封装版的socket用了
         std::any_cast<std::pair<event*, event*>*>(ev->data)->second = nc_event;
         event* p_event = std::any_cast<std::pair<event*, event*>*>(ev->data)->first;
         std::any_cast<std::pair<event*, event*>*>(p_event->data)->second = nc_event;
@@ -287,7 +289,7 @@ void download(event* ev, std::string arg) {
         // nc_event->set(EPOLLIN | EPOLLET | EPOLLONESHOT,
         //     std::bind(do_download, nc_event, arg, fm));
         // nc_event->add_to_tree();
-        ev->p_rea->pool->submit(
+        ev->p_rea->pool->submit( 
             [&] {
                 fm->download(arg, nc_event->fd, nc_event->buf,
                 nc_event->buffer_size, &nc_event->buflen,
@@ -474,7 +476,7 @@ void double_send_resp(event* ev, const std::string& resp1) {
     ev->remove_from_tree();
     event* nc_event = std::any_cast<std::pair<event*, event*>*>(ev->data)->second;
     std::string& resp2 = std::any_cast<std::string&>(nc_event->data);
-    while (resp2.empty() || resp2.back() == '\n') {
+    while (resp2.empty() || resp2.back() != '\n') {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
     ev->set(EPOLLOUT | EPOLLET | EPOLLONESHOT,
